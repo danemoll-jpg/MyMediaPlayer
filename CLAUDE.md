@@ -42,9 +42,11 @@ sessions). Then check `TODO.md` for the current objective. Never drop this
 rule when rewriting this file.
 
 Rounds 1, 2 and 3 are complete, verified on the owner's PC, and committed.
-No new round is set yet; check `TODO.md` for the next objective. For each
-round, report a status for every numbered item individually, and batch the
-round into one set of changes.
+Current objective is **Round 4** in `TODO.md`: package as an installed .exe
+with an icon and Start menu entry. Quiet Player is already the owner's
+default video player; keep the ProgID `QuietPlayer.Video` and never
+unregister. For each round, report a status for every numbered item
+individually, and batch the round into one set of changes.
 
 - Real-input tests (SendInput) must check, before every click or key, that
   the target window belongs to the test, and abort otherwise. The owner's

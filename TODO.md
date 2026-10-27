@@ -120,17 +120,73 @@ or their coordinates won't match UI Automation at 150%+ scaling.
 
 ## Current Objective (Focus Area)
 
-None set. Round 3 is complete. Owner to-do: run "Make Quiet Player my default
-video player…", search "Quiet Player" in Settings, click "Set default", and
-try one real Explorer double-click on an .mp4 and .mkv.
+**Round 4 — a real installed app: .exe, icon, Start menu.** Build all of the
+items below in one round, then report back with an explicit status for EACH
+numbered item (done / not done / deferred, and why). Do not mark the round
+complete if any item was skipped.
+
+**Critical:** the owner has ALREADY made Quiet Player his default video
+player (Settings > Default apps, 2026-10-27), and Windows stores that choice
+against the ProgID `QuietPlayer.Video`. Keep that ProgID name exactly. Never
+call `unregister()` / "Remove", and never remove-and-re-add while testing:
+that silently drops his defaults. Re-registering in place (`register()`
+overwriting the command) is safe and is how the switch to the .exe happens.
+
+1. **Icon (owner chose option "B", 2026-10-27).** A rounded square in deep
+   blue (#1f3a5f) with a large plain white play triangle, centred, nothing
+   else. Corner radius about 19% of the size, small transparent margin. Must
+   read clearly at 16×16. Generate it with a small script
+   (`make_icon.py`, Pillow) into `quiet_player.ico` with sizes 16, 24, 32,
+   48, 64, 128, 256, and commit both. Use it for the window/taskbar icon
+   (`setWindowIcon`), the .exe, the Start menu shortcut, and the file-type
+   icon (`DefaultIcon` → `"<exe>",0`).
+
+2. **Package as an .exe with PyInstaller, one-folder mode** (not one-file:
+   one-file unpacks ~120 MB to a temp folder on every launch, which would
+   make opening a video slow). Windowed, no console. Bundle `libmpv-2.dll`.
+   Fix any frozen-mode paths (the DLL lookup in `quiet_player.py` uses
+   `__file__`; when frozen use the .exe's folder). Output:
+   `dist\QuietPlayer\QuietPlayer.exe`. `build\` and `dist\` are git-ignored.
+
+3. **Install to a fixed location** outside the repo:
+   `%LOCALAPPDATA%\Programs\QuietPlayer\`. Rebuilding or moving the repo must
+   never break double-clicking videos again. Add a Start menu shortcut
+   "Quiet Player" (`%APPDATA%\Microsoft\Windows\Start Menu\Programs`) with
+   the icon. No desktop shortcut.
+
+4. **Switch the existing registration to the .exe, in place.** Add a
+   `--register` command-line flag that calls `register()` silently and exits
+   (no window, no Settings page). After installing, run the installed
+   `QuietPlayer.exe --register`. Then confirm, without touching Settings or
+   UserChoice: the `QuietPlayer.Video` command now points at the installed
+   .exe; `.mp4` and `.mkv` UserChoice still say `QuietPlayer.Video`; a real
+   Explorer double-click on an .mp4 and an .mkv opens the installed .exe
+   (allowed this round, since it changes no associations); Explorer shows
+   the new icon on video files (may need a shell refresh).
+
+5. **One-step update script: `install.bat`** in the repo. It builds with
+   PyInstaller, closes a running Quiet Player if there is one (or tells the
+   owner to close it and stops), copies `dist\QuietPlayer` to the install
+   folder, runs `--register`, and refreshes the Start menu shortcut. This is
+   how every future round gets onto the owner's PC. Running it twice in a
+   row must be safe.
+
+6. **Retire `Start Quiet Player.bat`.** It was a stop-gap added from the
+   planning session (2026-10-27) because double-clicking the .py flashed and
+   closed. Delete it once the installed .exe works. Running from source
+   (`python quiet_player.py`) must still work for development.
+
+7. **Verification before reporting** on the real PC: the installed .exe
+   launches from the Start menu with the new icon in the taskbar; startup
+   time from double-click to video is noted (old vs new, roughly); resume
+   positions, `settings.json` and every Round 1–3 behaviour still work from
+   the .exe (spot-check, not a full retest); single-window hand-off works
+   between two .exe launches; `install.bat` run twice in a row works; and
+   the owner's defaults were never changed or removed.
 
 ## Next Steps (Do Not Start Yet)
 
 - **Configurable key bindings** — deferred; hard-coded defaults first.
-- **Packaging as a standalone .exe (PyInstaller)** — deferred. Registration
-  already works without it (via pythonw). After packaging, run "Make Quiet
-  Player my default" again so Windows points at the .exe.
-- **App icon** — the registration currently borrows Python's icon.
 
 ## Technical Notes / Blockers
 
