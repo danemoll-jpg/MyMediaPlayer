@@ -19,9 +19,15 @@ BAR_HEIGHT = 40
 SKIP_SMALL = 10              # seconds (arrows)
 SKIP_LARGE = 60              # seconds (Shift+arrows)
 VOLUME_STEP = 5
+DEFAULT_VOLUME = 70          # first run only; after that the last level is remembered
+SPEEDS = (0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)   # ] and [ step through these
+RECENT_SHOWN = 10            # files in the Recent menu
+RECENT_KEPT = 20             # stored, so missing files don't shrink the menu
 
 PLAY_GLYPH = "▶︎"
 PAUSE_GLYPH = "⏸︎"
+VOLUME_GLYPH = "🔊︎"
+MUTED_GLYPH = "🔇︎"
 
 VIDEO_EXTS = (".mp4", ".m4v", ".mkv", ".avi", ".mov", ".wmv", ".webm", ".flv", ".ts",
               ".m2ts", ".mpg", ".mpeg", ".3gp", ".ogv")
@@ -42,6 +48,28 @@ SETTINGS_FILE = os.path.join(os.path.dirname(POSITIONS_FILE), "settings.json")
 # Only one window: opening a video while the player runs hands it to that window.
 INSTANCE_NAME = "QuietPlayer-" + (os.environ.get("USERNAME") or os.environ.get("USER") or "user")
 
+# Shown by "Keyboard shortcuts" in the ⋯ menu (keep in step with _shortcut_for).
+SHORTCUTS = (
+    ("Space", "Play / pause"),
+    ("← / →", f"Back / ahead {SKIP_SMALL} s"),
+    ("Shift+← / →", f"Back / ahead {SKIP_LARGE} s"),
+    ("Home", "Back to the start"),
+    (". / ,", "Next / previous frame (pauses)"),
+    ("] / [", "Faster / slower"),
+    ("Backspace", "Normal speed"),
+    ("↑ / ↓", "Volume up / down"),
+    ("M", "Mute / unmute"),
+    ("N / P", "Next / previous video in the folder"),
+    ("S", "Subtitles (cycles, including off)"),
+    ("A", "Audio track"),
+    ("F, double-click", "Fullscreen"),
+    ("Esc", "Leave fullscreen"),
+    ("Tab", "Show / hide the control bar"),
+    ("Middle-click", "Show the control bar"),
+    ("Click on the video", "Hide the control bar"),
+    ("Ctrl+O", "Open a video"),
+)
+
 EMPTY_HINT = "Click here or press Ctrl+O to open a video\n(or drag one onto this window)"
 
 # libmpv-2.dll and the icon sit next to this script, or next to QuietPlayer.exe
@@ -57,9 +85,9 @@ import mpv
 from PySide6.QtCore import QEvent, QLocale, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QKeyEvent, QPainter
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel,
-                               QMainWindow, QMenu, QMessageBox, QPushButton,
-                               QSlider, QStyle, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QFileDialog,
+                               QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox,
+                               QPushButton, QSlider, QStyle, QVBoxLayout, QWidget)
 
 import default_player
 
@@ -93,6 +121,10 @@ def save_settings(data):
         os.replace(tmp, SETTINGS_FILE)
     except OSError:
         pass
+
+
+def fmt_speed(s):
+    return f"{s:g}×"
 
 
 def natural_key(name):
@@ -256,7 +288,7 @@ class ControlBar(QWidget):
         self.setFocusPolicy(Qt.NoFocus)
         self.setStyleSheet("""
             QWidget { background: #1c1c1c; color: #ddd; }
-            QPushButton, QLabel#icon { border: none; padding: 0 8px; min-width: 28px;
+            QPushButton { border: none; padding: 0 8px; min-width: 28px;
                           font-family: "Segoe UI Symbol"; font-size: 15px; }
             QPushButton:hover { color: #fff; background: #2c2c2c; }
             QLabel { font-size: 12px; padding: 0 6px; }
@@ -278,13 +310,16 @@ class ControlBar(QWidget):
         self.fwd = btn("⏩︎", f"Ahead {SKIP_SMALL}s (→)", lambda: pw.seek(SKIP_SMALL))
         self.seek = JumpSlider(pw.seek_to_permille)
         self.seek.setRange(0, 1000)
+        self.seek.setToolTip(f"Seek (←/→ {SKIP_SMALL}s, Shift for {SKIP_LARGE}s; "
+                             f". and , step one frame)")
         self.time = QLabel("--:-- / --:--")
-        self.vol_icon = QLabel("🔊︎")
-        self.vol_icon.setObjectName("icon")
+        self.vol_icon = btn(VOLUME_GLYPH, "Mute (M)", pw.toggle_mute)
         self.vol = JumpSlider(pw.set_volume)
         self.vol.setRange(0, 100)
         self.vol.setFixedWidth(90)
-        self.more = btn("⋯", "More", lambda: pw.show_menu(self.more))
+        self.vol.setToolTip("Volume (↑/↓)")
+        self.more = btn("⋯", "More: recent files, keyboard shortcuts",
+                        lambda: pw.show_menu(self.more))
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(6, 0, 10, 0)
@@ -337,11 +372,17 @@ class PlayerWindow(QMainWindow):
             osd_margin_y=10,
             osd_border_size=2,
             sub_auto="exact",       # movie.srt, movie.en.srt next to the video
+            audio_pitch_correction="yes",   # mpv's default; keeps voices normal at 1.5x
         )
-        self.mpv.volume = 70
 
         self.positions = PositionStore()
         self.settings = load_settings()
+        vol = self.settings.get("volume")
+        if not isinstance(vol, (int, float)) or isinstance(vol, bool):
+            vol = DEFAULT_VOLUME
+        self.mpv.volume = max(0, min(100, round(vol)))
+        self.mpv.mute = False      # mute is never remembered
+        self.speed = 1.0           # this session only; carries over to the next file
         self.current = None        # path of the open file
         self.loaded = False        # True once mpv has loaded self.current
         self.resume_from = None    # start position passed to mpv for self.current
@@ -355,6 +396,11 @@ class PlayerWindow(QMainWindow):
         self.saver = QTimer(self)
         self.saver.timeout.connect(self.save_position)
         self.saver.start(SAVE_EVERY_MS)
+
+        self.volume_saver = QTimer(self)    # saves the volume 1 s after the last change
+        self.volume_saver.setSingleShot(True)
+        self.volume_saver.setInterval(1000)
+        self.volume_saver.timeout.connect(self.save_volume)
 
         self.poll = QTimer(self)
         self.poll.timeout.connect(self.refresh)
@@ -384,6 +430,7 @@ class PlayerWindow(QMainWindow):
         self.save_position()
         self.loaded = False
         self.current = os.path.abspath(path)
+        self.add_recent(self.current)
         self.resume_from = self.positions.get(norm_path(path))
         self.announce = os.path.basename(path) if announce else None
         if self.resume_from is not None:
@@ -402,9 +449,12 @@ class PlayerWindow(QMainWindow):
         lines = [self.announce] if self.announce else []
         if self.resume_from is not None:
             lines.append(f"Resumed {fmt_time(self.resume_from)}")
+        if self.speed != 1.0:      # never a surprise
+            lines.append(f"Speed {fmt_speed(self.speed)}")
         if lines:
+            long = self.announce or self.speed != 1.0
             self.indicate("\n".join(lines), always=True,
-                          ms=FILE_INDICATOR_MS if self.announce else INDICATOR_MS)
+                          ms=FILE_INDICATOR_MS if long else INDICATOR_MS)
         self.announce = None
 
     def on_eof(self, reached):
@@ -464,12 +514,67 @@ class PlayerWindow(QMainWindow):
     def show_menu(self, anchor):
         m = QMenu(self)
         m.addAction("Open a video…\tCtrl+O", self.open_dialog)
+        recent = m.addMenu("Recent")
+        recent.setToolTipsVisible(True)
+        files = self.recent_files()
+        for path in files:
+            a = recent.addAction(os.path.basename(path).replace("&", "&&"),
+                                 lambda p=path: self.open_recent(p))
+            a.setToolTip(path)
+        if not files:
+            recent.addAction("(none)").setEnabled(False)
+        recent.addSeparator()
+        recent.addAction("Clear list", self.clear_recent).setEnabled(bool(self._recent()))
+        m.addAction("Keyboard shortcuts…", self.show_shortcuts)
         m.addSeparator()
         if sys.platform == "win32":
             m.addAction("Make Quiet Player my default video player…", self.make_default)
             if default_player.is_registered():
                 m.addAction("Remove Quiet Player from Windows", self.remove_from_windows)
         m.exec(anchor.mapToGlobal(anchor.rect().topRight()) - _menu_offset(m))
+
+    def show_shortcuts(self):
+        # Modal: while it's open, eventFilter leaves keys to the dialog, not the player.
+        d = QDialog(self)
+        d.setWindowTitle("Keyboard shortcuts")
+        rows = "".join(f"<tr><td style='padding:2px 18px 2px 0'><b>{k}</b></td><td>{v}</td></tr>"
+                       for k, v in SHORTCUTS)
+        text = QLabel(f"<table>{rows}</table>")
+        text.setTextFormat(Qt.RichText)
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(d.reject)
+        for b in buttons.buttons():   # so Space can't press Close; Esc or a click closes it
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setAutoDefault(False)
+        lay = QVBoxLayout(d)
+        lay.addWidget(text)
+        lay.addWidget(buttons)
+        d.exec()
+
+    # --- recent files -------------------------------------------------------
+    def _recent(self):
+        r = self.settings.get("recent")
+        return [p for p in r if isinstance(p, str)] if isinstance(r, list) else []
+
+    def add_recent(self, path):
+        key = norm_path(path)
+        r = [path] + [p for p in self._recent() if norm_path(p) != key]
+        self.settings["recent"] = r[:RECENT_KEPT]
+        save_settings(self.settings)
+
+    def recent_files(self):
+        """Newest first; files that no longer exist are left out."""
+        return [p for p in self._recent() if os.path.isfile(p)][:RECENT_SHOWN]
+
+    def clear_recent(self):
+        self.settings["recent"] = []
+        save_settings(self.settings)
+
+    def open_recent(self, path):
+        if os.path.isfile(path):
+            self.open_file(path)
+        else:
+            self.indicate("File not found", always=True)
 
     def make_default(self):
         try:
@@ -515,11 +620,45 @@ class PlayerWindow(QMainWindow):
 
     def set_volume(self, v):
         self.mpv.volume = max(0, min(100, v))
+        self.mpv.mute = False      # moving the slider while muted unmutes
+        self.volume_saver.start()
 
     def change_volume(self, delta):
         v = max(0, min(100, round(self.mpv.volume or 0) + delta))
         self.mpv.volume = v
+        self.mpv.mute = False      # so does ↑/↓
+        self.volume_saver.start()
         self.indicate(f"Vol {v}%")
+
+    def save_volume(self):
+        try:
+            v = round(self.mpv.volume)
+        except Exception:
+            return
+        if self.settings.get("volume") != v:
+            self.settings["volume"] = v
+            save_settings(self.settings)
+
+    def toggle_mute(self):
+        muted = not self.mpv.mute
+        self.mpv.mute = muted
+        self.bar.vol_icon.setText(MUTED_GLYPH if muted else VOLUME_GLYPH)
+        self.indicate("Muted" if muted else "Unmuted")   # the bar shows it, so only when hidden
+
+    def step_speed(self, step):
+        """step is +1 / -1 along SPEEDS (stopping at the ends), or 0 for 1x."""
+        if step == 0:
+            new = 1.0
+        else:
+            i = min(range(len(SPEEDS)), key=lambda j: abs(SPEEDS[j] - self.speed))
+            new = SPEEDS[max(0, min(len(SPEEDS) - 1, i + step))]
+        self.speed = new
+        self.mpv.speed = new
+        self.indicate(f"Speed {fmt_speed(new)}", always=True)   # the bar doesn't show speed
+
+    def frame_step(self, forward):
+        if self.loaded:
+            self.mpv.command("frame-step" if forward else "frame-back-step")   # both pause
 
     def toggle_fullscreen(self):
         if self.isFullScreen():
@@ -537,7 +676,7 @@ class PlayerWindow(QMainWindow):
     def refresh(self):
         m = self.mpv
         try:
-            pos, dur, paused, vol = m.time_pos, m.duration, m.pause, m.volume
+            pos, dur, paused, vol, muted = m.time_pos, m.duration, m.pause, m.volume, m.mute
         except Exception:
             return
         b = self.bar
@@ -547,6 +686,7 @@ class PlayerWindow(QMainWindow):
             b.seek.setValue(int(pos / dur * 1000) if pos is not None and dur else 0)
         if vol is not None and not b.vol.dragging:
             b.vol.setValue(round(vol))
+        b.vol_icon.setText(MUTED_GLYPH if muted else VOLUME_GLYPH)
 
     # --- input --------------------------------------------------------------
     def eventFilter(self, obj, ev):
@@ -603,6 +743,18 @@ class PlayerWindow(QMainWindow):
             return ((lambda: self.cycle_track("sub")), False)
         if k == Qt.Key_A and none:
             return ((lambda: self.cycle_track("audio")), False)
+        if k == Qt.Key_M and none:
+            return (self.toggle_mute, False)
+        if k == Qt.Key_BracketRight and none:
+            return ((lambda: self.step_speed(1)), True)
+        if k == Qt.Key_BracketLeft and none:
+            return ((lambda: self.step_speed(-1)), True)
+        if k == Qt.Key_Backspace and none:
+            return ((lambda: self.step_speed(0)), False)
+        if k == Qt.Key_Period and none:
+            return ((lambda: self.frame_step(True)), True)
+        if k == Qt.Key_Comma and none:
+            return ((lambda: self.frame_step(False)), True)
         return None
 
     def dragEnterEvent(self, e):
@@ -628,6 +780,8 @@ class PlayerWindow(QMainWindow):
         self.poll.stop()
         self.saver.stop()
         self.save_position()
+        self.volume_saver.stop()
+        self.save_volume()
         self.mpv.terminate()
         super().closeEvent(e)
 

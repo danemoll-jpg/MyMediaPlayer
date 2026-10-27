@@ -227,67 +227,88 @@ Per-item status (2026-10-27):
    video files show the new icon (`ie4uinit -show` if not).
 3. If all pass, Round 4 is complete.
 
+**Round 5 — speed, frame stepping, mute, remembered volume, recent files,
+shortcuts dialog (2026-10-27). Built and tested; waiting on the owner's
+`install.bat` run.** Everything is in `quiet_player.py`. Tested on the
+owner's PC with real OS input (SendInput, guarded: before every key or click
+the harness checks that the player owns the foreground window or the window
+under the cursor, and aborts otherwise). `APPDATA` and `USERNAME` were pointed
+at scratch values, so the owner's files and single-instance name were never
+touched. Media was synthetic (ffmpeg: 10 fps test pattern plus a 440 Hz
+tone, so one frame = 0.1 s and pitch is measurable). Final runs:
+from source in-process 53/53; out-of-process against the built exe 32/32;
+the same out-of-process suite against source 32/32.
+
+1. Done — `]` / `[` step through `SPEEDS` (0.5 to 2) and stop at the
+   ends; `Backspace` resets to 1×. Indicator "Speed 1.25×" is shown with
+   the bar visible or hidden. Speed is session-only: it carries over to N/P
+   and any other file opened in the same session, and is 1× after a
+   restart. A file opening at a speed other than 1× gets "Speed 1.5×" in
+   its open indicator (shown 1.5 s). `audio_pitch_correction="yes"` is
+   set explicitly (it was already mpv's default). How it was checked:
+   - Pitch: the app's own `PlayerWindow`, with mpv audio sent to a WAV,
+     measures 440 Hz at 1×, 1.5× and 2×. The control run with correction
+     forced off measures 660 Hz at 1.5×, so the test does catch a shift.
+   - Actual rate: 1.50× measured live. On the exe, speed was checked from
+     saved positions: 2× cap 7.8 s in 4 s, 0.5× cap 3.1 s in 6 s,
+     Backspace 4.0 s in 4 s, carried to ep02 6.0 s in 4 s.
+2. Done — `.` / `,` call mpv `frame-step` / `frame-back-step`; both pause
+   if playing, and holding the key repeats. No indicator. Checked: exactly
+   +1 / −1 frame while paused; pauses while playing in both directions;
+   holding repeats both ways. On the exe: 40.0 → `,`×5 `.`×2 → 39.7.
+3. Done — `M` toggles mpv `mute`; unmuting returns to the same level. The
+   volume icon is now a NoFocus button: 🔇 while muted, and clicking it
+   toggles mute. "Muted"/"Unmuted" is drawn only while the bar is hidden.
+   ↑/↓ unmute. **Small extra:** dragging the volume slider also unmutes
+   (otherwise moving it while muted does nothing audible).
+4. Done — volume saved to `settings.json` 1 s after the last change
+   (checked that it isn't written before then) and on close; the app
+   starts at the saved level (70 on first run). Mute is never saved: the
+   app always starts unmuted (checked after quitting while muted).
+5. Done — ⋯ → Recent: 10 newest existing files, newest first, file name
+   (`&` escaped) with the full path as tooltip, then a separator and
+   "Clear list" ("(none)" and a disabled Clear list when empty). Up to 20
+   are stored, so missing files don't shrink the menu. Every route goes
+   through `open_file`, so all of them move the file to the top; tested
+   for command line, second-launch hand-off, drag-drop, N, and Recent
+   itself. The Open dialog uses the same `open_file` call but wasn't
+   driven in the test. A recent file follows the resume rule ("Resumed
+   00:40"). Missing file left out; Clear list empties it.
+6. Done — ⋯ → "Keyboard shortcuts…" opens a modal dialog listing every
+   shortcut (from the `SHORTCUTS` table). New tooltips: volume icon "Mute
+   (M)", volume slider "Volume (↑/↓)", seek bar mentions arrows and
+   `.`/`,`, ⋯ "More: recent files, keyboard shortcuts".
+   **Bug found and fixed:** Space pressed the dialog's focused Close
+   button, so the dialog closed and the keys that followed reached the
+   player. The button is now NoFocus, so only Esc or a click closes it.
+   Checked: Space, Enter, arrows, M, ], [, Backspace, `.`, `,`, N, Tab and
+   Home with the dialog open change nothing (file, bar, time, volume,
+   mute); Esc closes it; focus returns to the player; keys work again.
+   While the dialog is up the bar is drawn in Qt's inactive-window style
+   (cosmetic only).
+7. Done, apart from the owner's install step. `install.bat` ran from the
+   session (built and installed to `%LOCALAPPDATA%\Programs\QuietPlayer`;
+   no player was running). Its `--register` landed only in the session's
+   private registry copy, as expected. Tested from source and from the
+   installed exe (lists above). The bar never changed on its own in any
+   run: polled every 20 ms, through speed, frame, mute, volume, recent,
+   dialog, restarts and hand-offs, and with the mouse moved over the video.
+   Not done by the agent: listening by ear. Pitch was measured instead.
+   During one exe run the foreground switched to another window (Unity)
+   right after the dialog closed and the guard aborted the run; a rerun
+   showed focus returns to the player, so it was likely outside activity.
+
+#### To finish Round 5 (owner)
+
+1. Double-click `install.bat` in Explorer and wait for "Quiet Player is
+   installed".
+2. Play something: try `]`, `Backspace`, `M`, ⋯ → Recent and ⋯ → Keyboard
+   shortcuts. Then Round 5 is complete.
+
 ## Current Objective (Focus Area)
 
-**Round 5 — speed, frame stepping, mute, remembered volume, recent files.**
-Build all of the items below in one round, then report back with an explicit
-status for EACH numbered item (done / not done / deferred, and why). Do not
-mark the round complete if any item was skipped. All earlier rules still
-apply: nothing may make the control bar appear on its own, shortcuts work
-with the bar shown or hidden, and bar widgets never take keyboard focus.
-Quiet Player is the owner's default player: keep ProgID `QuietPlayer.Video`,
-never unregister.
-
-New keys don't clash with existing ones (Space, arrows, Shift+arrows, ↑/↓,
-F, Esc, Tab, Ctrl+O, Home, N, P, S, A).
-
-1. **Playback speed.** `]` faster, `[` slower, stepping through 0.5×,
-   0.75×, 1×, 1.25×, 1.5×, 1.75×, 2× (stop at the ends). `Backspace` resets
-   to 1×. Audio pitch stays normal (mpv's default `audio-pitch-correction`;
-   confirm it isn't off). Indicator "Speed 1.25×" shown even with the bar
-   visible, since the bar doesn't show speed. Speed carries over to the next
-   file in the same session (useful for a talky series with N), and is not
-   remembered after closing the app. When a file opens at a speed other than
-   1×, add "Speed 1.5×" to its open indicator so it's never a surprise.
-
-2. **Frame-by-frame.** `.` steps one frame forward, `,` one frame back
-   (mpv `frame-step` / `frame-back-step`). Stepping pauses playback if it
-   was playing. Holding the key repeats. No indicator (the frame itself is
-   the feedback).
-
-3. **Mute.** `M` toggles mute (mpv `mute`, separate from volume, so
-   unmuting returns to the same level). The bar's volume icon shows 🔇 while
-   muted. Indicator "Muted" / "Unmuted" follows the Round 1 rule (only while
-   the bar is hidden), since the bar shows it. Clicking the volume icon on
-   the bar also toggles mute. Changing volume with ↑/↓ while muted unmutes.
-
-4. **Remember volume.** Save the volume level in
-   `%APPDATA%\QuietPlayer\settings.json` when it changes (debounced, e.g.
-   1 s after the last change) and on close; start at the saved level
-   instead of 70%. Mute is NOT remembered: the app always starts unmuted.
-
-5. **Recent files.** A "Recent" submenu in the ⋯ menu with the 10 most
-   recently opened files (file name only, full path as tooltip), newest
-   first, then a separator and "Clear list". Files that no longer exist are
-   left out of the menu. Stored in `settings.json`. Opening any file by any
-   route (dialog, drag-drop, double-click in Explorer, N/P, Recent) moves it
-   to the top. Choosing a recent file follows the Round 2 resume rule.
-
-6. **Help line.** Update the tooltips and the ⋯ menu so the new keys are
-   discoverable: add a "Keyboard shortcuts" item in the ⋯ menu that shows a
-   small dialog listing every shortcut. Keys must not trigger player actions
-   while that dialog is open.
-
-7. **Install and verify.** Build with `install.bat` for testing, but the
-   owner must run `install.bat` from Explorer himself at the end (registry
-   writes from a session are virtualized; see Round 4). Test from source and
-   from the built exe with `APPDATA` pointed at a scratch folder: each speed
-   step and both ends, Backspace, pitch sounds normal (check with a tone or
-   speech file), speed carries to the next file, frame step both directions
-   while playing and paused, mute via M, icon and click, ↑ unmutes, volume
-   restored after restart, mute not restored, Recent order/missing-file/
-   Clear list, the shortcuts dialog, and the bar never appears from any
-   Round 5 action.
+None yet: waiting for the owner's `install.bat` run for Round 5 and the
+next round's plan.
 
 ## Next Steps (Do Not Start Yet)
 
