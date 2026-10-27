@@ -25,7 +25,9 @@
 - Keyboard shortcuts are handled at the window level so focus on a bar widget
   can never hijack Space or the arrow keys.
 - Never bind anything to mouse side buttons (owner has them disabled).
-- Keep it small: a single main module is fine until it clearly isn't.
+- Keep it small: `quiet_player.py` is the app; `default_player.py` holds the
+  Windows registry code for "make default" (HKCU only, never touch other
+  apps' associations).
 
 ## Commands
 ```
@@ -39,11 +41,12 @@ updates to `TODO.md`/`CLAUDE.md` are often dropped into the repo between
 sessions). Then check `TODO.md` for the current objective. Never drop this
 rule when rewriting this file.
 
-Rounds 1 (first working player) and 2 (resume, next/previous file,
-subtitle/audio shortcuts) are complete; everything lives in
-`quiet_player.py`. No next round is defined yet; see Next Steps in
-`TODO.md`. For each round, report a status for every numbered item
-individually, and batch the round into one set of changes.
+Rounds 1 and 2 are complete and committed. Current objective is **Round 3**
+in `TODO.md` (open-file button/empty state, ⋯ menu, default-player
+registration, single window). Its code was written by the planning session
+and is NOT yet verified on Windows — item 5 is yours. For each round, report
+a status for every numbered item individually, and batch the round into one
+set of changes.
 
 - `libmpv-2.dll` sits next to the script and is git-ignored, so a fresh clone
   needs it re-downloaded (source noted in `TODO.md`).

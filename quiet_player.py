@@ -36,6 +36,14 @@ RESUME_MIN = 30              # seconds: below this counts as "not really started
 FINISHED_FRACTION = 0.95     # past 95% ...
 FINISHED_TAIL = 60           # ... or within the last 60 s counts as "finished"
 
+# Small app settings (last folder used in the Open dialog)
+SETTINGS_FILE = os.path.join(os.path.dirname(POSITIONS_FILE), "settings.json")
+
+# Only one window: opening a video while the player runs hands it to that window.
+INSTANCE_NAME = "QuietPlayer-" + (os.environ.get("USERNAME") or os.environ.get("USER") or "user")
+
+EMPTY_HINT = "Click here or press Ctrl+O to open a video\n(or drag one onto this window)"
+
 # libmpv-2.dll may sit next to this script.
 _here = os.path.dirname(os.path.abspath(__file__))
 os.environ["PATH"] = _here + os.pathsep + os.environ.get("PATH", "")
@@ -44,10 +52,13 @@ if hasattr(os, "add_dll_directory"):
 
 import mpv
 from PySide6.QtCore import QEvent, QLocale, QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QColor, QKeyEvent, QPainter
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel,
-                               QMainWindow, QPushButton, QSlider, QStyle,
-                               QVBoxLayout, QWidget)
+                               QMainWindow, QMenu, QMessageBox, QPushButton,
+                               QSlider, QStyle, QVBoxLayout, QWidget)
+
+import default_player
 
 def fmt_time(t):
     if t is None or t < 0:
@@ -59,6 +70,26 @@ def fmt_time(t):
 
 def norm_path(path):
     return os.path.normcase(os.path.abspath(path))
+
+
+def load_settings():
+    try:
+        with open(SETTINGS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(data):
+    try:
+        os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+        tmp = SETTINGS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, SETTINGS_FILE)
+    except OSError:
+        pass
 
 
 def natural_key(name):
@@ -185,10 +216,25 @@ class VideoArea(QWidget):
         self.setFocusPolicy(Qt.NoFocus)
         self.setMouseTracking(False)
 
+    def paintEvent(self, e):
+        # Only visible before the first file loads; after that mpv draws here.
+        p = QPainter(self)
+        p.fillRect(self.rect(), Qt.black)
+        if self.pw.current is None:
+            p.setPen(QColor("#888"))
+            f = p.font()
+            f.setPointSize(13)
+            p.setFont(f)
+            p.drawText(self.rect(), Qt.AlignCenter, EMPTY_HINT)
+        p.end()
+
     def mousePressEvent(self, e):
         b = e.button()
         if b == Qt.LeftButton:
-            self.pw.on_video_left_click()
+            if self.pw.current is None:      # nothing open yet: click = Open
+                self.pw.open_dialog()
+            else:
+                self.pw.on_video_left_click()
         elif b == Qt.MiddleButton:
             self.pw.on_video_middle_click()
         # Side buttons (Back/Forward) and anything else: deliberately ignored.
@@ -223,6 +269,7 @@ class ControlBar(QWidget):
             b.clicked.connect(slot)
             return b
 
+        self.open = btn("📂︎", "Open a video (Ctrl+O)", pw.open_dialog)
         self.back = btn("⏪︎", f"Back {SKIP_SMALL}s (←)", lambda: pw.seek(-SKIP_SMALL))
         self.play = btn(PLAY_GLYPH, "Play/Pause (Space)", pw.toggle_pause)
         self.fwd = btn("⏩︎", f"Ahead {SKIP_SMALL}s (→)", lambda: pw.seek(SKIP_SMALL))
@@ -234,16 +281,18 @@ class ControlBar(QWidget):
         self.vol = JumpSlider(pw.set_volume)
         self.vol.setRange(0, 100)
         self.vol.setFixedWidth(90)
+        self.more = btn("⋯", "More", lambda: pw.show_menu(self.more))
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(6, 0, 10, 0)
         lay.setSpacing(4)
-        for w in (self.back, self.play, self.fwd):
+        for w in (self.open, self.back, self.play, self.fwd):
             lay.addWidget(w)
         lay.addWidget(self.seek, 1)
         lay.addWidget(self.time)
         lay.addWidget(self.vol_icon)
         lay.addWidget(self.vol)
+        lay.addWidget(self.more)
 
 
 class PlayerWindow(QMainWindow):
@@ -289,6 +338,7 @@ class PlayerWindow(QMainWindow):
         self.mpv.volume = 70
 
         self.positions = PositionStore()
+        self.settings = load_settings()
         self.current = None        # path of the open file
         self.loaded = False        # True once mpv has loaded self.current
         self.resume_from = None    # start position passed to mpv for self.current
@@ -400,8 +450,50 @@ class PlayerWindow(QMainWindow):
         self.indicate(f"{name}: {track_label(sel) if sel else 'off'}", always=True)
 
     def open_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open video", "", VIDEO_FILTER)
-        self.open_file(path)
+        start = os.path.dirname(self.current) if self.current else self.settings.get("last_dir", "")
+        path, _ = QFileDialog.getOpenFileName(self, "Open video", start, VIDEO_FILTER)
+        if path:
+            self.settings["last_dir"] = os.path.dirname(os.path.abspath(path))
+            save_settings(self.settings)
+            self.open_file(path)
+
+    # --- menu / default player ----------------------------------------------
+    def show_menu(self, anchor):
+        m = QMenu(self)
+        m.addAction("Open a video…\tCtrl+O", self.open_dialog)
+        m.addSeparator()
+        if sys.platform == "win32":
+            m.addAction("Make Quiet Player my default video player…", self.make_default)
+            if default_player.is_registered():
+                m.addAction("Remove Quiet Player from Windows", self.remove_from_windows)
+        m.exec(anchor.mapToGlobal(anchor.rect().topRight()) - _menu_offset(m))
+
+    def make_default(self):
+        try:
+            default_player.register([e for e in VIDEO_EXTS])
+        except OSError as err:
+            QMessageBox.warning(self, "Quiet Player", f"Couldn't register with Windows:\n{err}")
+            return
+        QMessageBox.information(
+            self, "Quiet Player",
+            "Quiet Player is now registered with Windows as a video player.\n\n"
+            "Windows doesn't let apps make themselves the default, so Settings "
+            "will open next. Click \"Set default\" at the top of the Quiet Player "
+            "page (or pick it for each file type you want).\n\n"
+            "Another way: right-click any video, Open with > Choose another app > "
+            "Quiet Player, and tick \"Always\".")
+        default_player.open_default_apps_settings()
+
+    def remove_from_windows(self):
+        try:
+            default_player.unregister([e for e in VIDEO_EXTS])
+        except OSError as err:
+            QMessageBox.warning(self, "Quiet Player", f"Couldn't remove it:\n{err}")
+            return
+        QMessageBox.information(
+            self, "Quiet Player",
+            "Quiet Player has been removed from Windows' app lists. File types "
+            "that used it will go back to asking which app to use.")
 
     def toggle_pause(self):
         self.mpv.pause = not self.mpv.pause
@@ -519,6 +611,15 @@ class PlayerWindow(QMainWindow):
             self.open_file(urls[0].toLocalFile())
             e.acceptProposedAction()
 
+    def receive_from_other_instance(self, path):
+        """A second launch (e.g. double-clicking a video) handed us a file."""
+        if path:
+            self.open_file(path)
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
     def closeEvent(self, e):
         self.poll.stop()
         self.saver.stop()
@@ -527,14 +628,62 @@ class PlayerWindow(QMainWindow):
         super().closeEvent(e)
 
 
+def _menu_offset(menu):
+    """Open the menu just above its button, right-aligned to it."""
+    from PySide6.QtCore import QPoint
+    size = menu.sizeHint()
+    return QPoint(size.width(), size.height())
+
+
+def hand_to_running_instance(path):
+    """If Quiet Player is already open, give it the file and return True."""
+    sock = QLocalSocket()
+    sock.connectToServer(INSTANCE_NAME)
+    if not sock.waitForConnected(300):
+        return False
+    sock.write((os.path.abspath(path) if path else "").encode("utf-8"))
+    sock.flush()
+    sock.waitForBytesWritten(1000)
+    sock.disconnectFromServer()
+    return True
+
+
+def listen_for_other_instances(window):
+    server = QLocalServer(window)
+    QLocalServer.removeServer(INSTANCE_NAME)   # clear a stale name after a crash
+
+    def on_connection():
+        conn = server.nextPendingConnection()
+
+        done = []
+
+        def read():
+            if done:
+                return
+            done.append(True)
+            data = bytes(conn.readAll()).decode("utf-8", "replace").strip()
+            conn.deleteLater()
+            window.receive_from_other_instance(data)
+        conn.disconnected.connect(read)
+        if conn.state() == QLocalSocket.UnconnectedState:   # already gone
+            read()
+    server.newConnection.connect(on_connection)
+    server.listen(INSTANCE_NAME)
+    return server
+
+
 def main():
     app = QApplication(sys.argv)
+    path = sys.argv[1] if len(sys.argv) > 1 else None
+    if hand_to_running_instance(path):
+        return
     import locale
     locale.setlocale(locale.LC_NUMERIC, "C")   # libmpv requires C numeric locale
     w = PlayerWindow()
+    w._server = listen_for_other_instances(w)
     w.show()
-    if len(sys.argv) > 1:
-        w.open_file(sys.argv[1])
+    if path:
+        w.open_file(path)
     sys.exit(app.exec())
 
 

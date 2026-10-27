@@ -65,75 +65,70 @@ synthetic test media made with ffmpeg (no real multi-track MKV was used):
 
 ## Current Objective (Focus Area)
 
-**No round defined yet.** Pick from Next Steps when the owner says so.
-Round 2 spec kept below for reference.
+**Round 3 — open files from the app, and "make Quiet Player my default".**
+The code for items 1–4 was written overnight by the planning session (Claude
+in the owner's chat), NOT by the coding agent, and has **not been run on
+Windows**: the planning session had no PySide6/libmpv available. It passed a
+syntax check, a stand-in smoke test of the new code paths, and a registry
+test against a simulated `winreg`. The coding agent's job this round is item
+5: verify on the real PC, fix whatever is broken, and report per item.
+Rule from Round 1 still applies: nothing here may make the bar appear on its
+own.
 
-**Round 2 — resume, folder navigation, subtitles/audio.** Build all of the
-items below in one round, then report back with an explicit status for EACH
-numbered item (done / not done / deferred, and why). Do not mark the round
-complete if any item was skipped. All Round 1 rules still apply — in
-particular, nothing in this round may make the control bar appear on its own.
+1. **Visible ways to open a file from inside the app.**
+   - 📂 button at the left of the control bar (= `Ctrl+O`).
+   - Before any file is open, the video area shows "Click here or press
+     Ctrl+O to open a video (or drag one onto this window)", and a left-click
+     there opens the file dialog (once a file is open, left-click goes back to
+     hiding the bar).
+   - The dialog starts in the current file's folder, or else the last folder
+     used (saved in `%APPDATA%\QuietPlayer\settings.json`).
 
-1. **Resume where you left off.** Remember the playback position per file and
-   resume there the next time that file is opened (any way: drag-drop,
-   `Ctrl+O`, command line, next/previous).
-   - Store positions in a small JSON file at
-     `%APPDATA%\QuietPlayer\positions.json`, keyed by the file's full
-     normalized path. Keep only the 500 most recently played entries.
-   - Save the current position when the app closes, when another file is
-     opened, and every ~10 seconds during playback (so a crash loses little).
-   - Don't save (and clear any saved entry) if the position is under 30
-     seconds, or within the last 5% or last 60 seconds of the file — that
-     counts as "not really started" or "finished".
-   - On resume, show the indicator "Resumed 12:34".
-   - `Home` jumps back to the start of the current file (indicator
-     "Start").
+2. **⋯ menu at the right end of the bar:** "Open a video…",
+   "Make Quiet Player my default video player…", and (only once registered)
+   "Remove Quiet Player from Windows".
 
-2. **Next / previous file in the same folder.** `N` opens the next video file
-   in the current file's folder, `P` the previous one.
-   - Only video extensions (same list as the `Ctrl+O` filter).
-   - Natural sort order, so "Episode 2" comes before "Episode 10".
-   - No wrap-around: at either end show the indicator "Last file" /
-     "First file" and do nothing.
-   - The new file follows item 1's resume rule, and the current file's
-     position is saved before switching.
-   - Add a constant `AUTO_NEXT = False` at the top of the code. When `True`,
-     reaching the end of a file opens the next one automatically. Default
-     stays off (current behaviour: stop on the last frame).
+3. **Default player registration** (`default_player.py`, per user, HKCU
+   only, no admin). Registers ProgID `QuietPlayer.Video`, Capabilities,
+   `RegisteredApplications` and `OpenWithProgids` for every extension in
+   `VIDEO_EXTS`. Launch command is `pythonw.exe "…\quiet_player.py" "%1"`
+   (or the .exe itself once packaged). Windows 10/11 don't let apps take the
+   default silently, so after registering, a message explains the last step
+   and Settings opens on `ms-settings:defaultapps?registeredAppUser=Quiet%20Player`
+   where the owner clicks "Set default". "Remove" deletes only what
+   `register()` added — other apps' entries are never touched.
 
-3. **Subtitle and audio-track shortcuts.**
-   - `S` cycles subtitle tracks, including "off". Indicator shows the result,
-     e.g. "Subs: English" / "Subs: off" (use the track title or language;
-     fall back to "Track 2").
-   - `A` cycles audio tracks the same way: "Audio: Japanese".
-   - External subtitle files next to the video with the same name
-     (e.g. `movie.srt`, `movie.en.srt`) load automatically.
-   - Subtitles themselves are rendered by mpv as normal; `osd-level=0` must
-     not hide them.
+4. **One window only.** Opening a video while Quiet Player is already running
+   (e.g. double-clicking in Explorer once it's the default) hands the file to
+   the existing window via `QLocalServer`/`QLocalSocket` and brings it to the
+   front, instead of opening a second player. Launching with no file just
+   focuses the existing window.
 
-4. **Indicator rule update.** For actions whose result does NOT show on the
-   control bar (resume, Start, next/previous file name, First/Last file,
-   subtitle and audio track changes), show the indicator even while the bar
-   is visible. All other indicators keep the Round 1 rule (only while the bar
-   is hidden). `SHOW_INDICATOR = False` still turns every indicator off. When
-   switching files with N/P, show the new file name for ~1.5 seconds instead
-   of 0.5.
-
-5. **Verification before reporting.** Test on the real PC:
-   - Resume across a full app restart, plus the under-30s and near-the-end
-     rules.
-   - N/P through a folder with at least 10 numbered files to prove natural
-     sort, and the First/Last file ends.
-   - `S` and `A` on an MKV with more than one subtitle and audio track if
-     available (say so if no such file was found), plus an external `.srt`.
-   - Confirm the control bar never appears from any Round 2 action.
-   - Do one real drag from File Explorer (left over from Round 1).
+5. **Verification on the real PC (coding agent).** Report done / not done /
+   fixed for each:
+   - App starts; 📂 and ⋯ show on the bar; the empty-state text renders
+     before a file is open and disappears once mpv draws; click-to-open works.
+   - Dialog remembers the folder across restarts.
+   - ⋯ menu opens just above its button (it is positioned by hand —
+     `_menu_offset`) and Space/arrows don't trigger player shortcuts while it
+     is open.
+   - Make default → Settings opens on Quiet Player's page; after choosing it,
+     double-clicking an .mp4 and an .mkv in Explorer opens Quiet Player with
+     no console window, and "Open with" shows the name "Quiet Player" (not
+     "Python"). If Settings ignores `registeredAppUser`, say so.
+   - With the player open, double-click a second video: same window, new
+     file, no second window, bar state unchanged.
+   - Remove from Windows → Quiet Player disappears from Open with / Default
+     apps; VLC/Films & TV associations are unchanged.
+   - The bar never appears from any Round 3 action.
 
 ## Next Steps (Do Not Start Yet)
 
 - **Configurable key bindings** — deferred; hard-coded defaults first.
-- **Packaging as a standalone .exe (PyInstaller) and registering as an
-  "Open with" option** — deferred until the player itself is right.
+- **Packaging as a standalone .exe (PyInstaller)** — deferred. Registration
+  already works without it (via pythonw). After packaging, run "Make Quiet
+  Player my default" again so Windows points at the .exe.
+- **App icon** — the registration currently borrows Python's icon.
 
 ## Technical Notes / Blockers
 
