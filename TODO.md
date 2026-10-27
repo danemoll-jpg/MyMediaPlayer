@@ -6,9 +6,34 @@ when explicitly asked to.
 
 ## Completed Tasks
 
-None yet.
+**Round 1 — first working player (2026-10-27).** All eight items done in
+`quiet_player.py`. Verified on the owner's PC with real OS-level mouse/keyboard
+input (SendInput), 43/43 checks passing on 3 consecutive runs: H.264 MP4,
+HEVC MKV (d3d11va hardware decode), MOV. Results per item:
+
+1. Done — PySide6 + python-mpv, libmpv embedded via `wid`; osc/osd/input all off.
+2. Done — drag-and-drop, `Ctrl+O`, command-line path. Note: the drop test fed
+   the window's drop handler directly; a real Explorer drag was not automated
+   (worth one manual try).
+3. Done — 40px strip below the video in a layout; video resizes, incl. fullscreen.
+4. Done — Tab and left-click on video hide instantly (`setVisible(False)`).
+5. Done — show only via Tab / middle-click; side buttons ignored. Tested
+   against mouse move, hover, pause, file open, EOF, fullscreen in/out.
+6. Done — app-level event filter; all bar widgets are `NoFocus`.
+7. Done — `SHOW_INDICATOR` at top of file; text drawn by mpv's OSD renderer via
+   `show-text ... level 0` (mpv's own OSD stays off with `osd-level=0`).
+8. Done — see above. Embedding risk did NOT materialise: with
+   `input-cursor=no`, left/middle/double-clicks on the video reach Qt without
+   any overlay or workaround.
+
+Launch behaviour: the bar starts visible on app launch (only), so a fresh
+window isn't a blank black box. After that, only the user changes it.
 
 ## Current Objective (Focus Area)
+
+**Round 1 — COMPLETE (see Completed Tasks). Next round not yet defined; pick
+from Next Steps when the owner says so.** Original round 1 spec kept below
+for reference.
 
 **Round 1 — first working player.** Build all of the items below in one round,
 then report back with an explicit status for EACH numbered item
@@ -86,7 +111,12 @@ item was skipped.
 - **Owner's setup:** Windows 11 Pro, Dell XPS 8930, GTX 1660 Ti. Mouse side
   buttons are disabled — never bind anything to them.
 - **libmpv dependency:** python-mpv needs `libmpv-2.dll` (from an mpv
-  "dev" build for Windows) placed next to the script or on PATH.
+  "dev" build for Windows) placed next to the script or on PATH. Installed
+  from shinchiro/mpv-winbuild-cmake release 20261021
+  (`mpv-dev-x86_64-20261021-git-e471496c56.7z`); git-ignored.
+- **Python:** this PC runs Python 3.14 with PySide6 6.12.0, python-mpv 1.0.8.
+- **Display:** 150%+ scaling, 1280x720 logical. The window sizes itself to
+  80% of the available screen so the bar is never off-screen.
 - **Embedding risk to check first:** when libmpv renders into a native child
   window (`wid`), Windows may deliver mouse clicks to that child window instead
   of the Qt widget, so click/middle-click/double-click on the video may never
@@ -94,6 +124,7 @@ item was skipped.
   them, but confirm early. If clicks still don't arrive, fall back to a
   transparent Qt overlay widget above the video that captures mouse input
   only (it must draw nothing visible).
+  **Checked 2026-10-27: not needed.** Clicks reach the Qt widget as-is.
 - **Design decision (RESOLVED):** the bar never overlays the video. In
   fullscreen this means the video shrinks slightly when the bar is shown.
   That trade-off was chosen deliberately.

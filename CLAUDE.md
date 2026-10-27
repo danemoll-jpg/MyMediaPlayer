@@ -36,7 +36,12 @@ python quiet_player.py [optional path to video]
 ## Where things stand
 **Always check `TODO.md` for the current objective before starting work.**
 
-Nothing built yet. Current objective is Round 1 in `TODO.md`: eight numbered
-items making up the first working player. Report back with a status for each
-numbered item individually, and batch the whole round into one set of
-changes rather than incremental pushes.
+Round 1 (first working player) is complete: everything lives in
+`quiet_player.py`. The next round isn't defined yet; see Next Steps in
+`TODO.md`. For each round, report a status for every numbered item
+individually, and batch the round into one set of changes.
+
+- `libmpv-2.dll` sits next to the script and is git-ignored, so a fresh clone
+  needs it re-downloaded (source noted in `TODO.md`).
+- The corner indicator uses mpv `show-text` with level 0. It is the only
+  thing mpv draws apart from the video.
