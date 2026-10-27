@@ -4,12 +4,17 @@ The bar lives in its own strip below the video (never overlaid), hides
 instantly, and only comes back on Tab or middle-click on the video.
 """
 
+import json
 import os
+import re
 import sys
+import time
 
 # Settings -------------------------------------------------------------------
-SHOW_INDICATOR = True        # tiny corner text for shortcuts used while the bar is hidden
+SHOW_INDICATOR = True        # tiny corner text for shortcuts (False turns every indicator off)
 INDICATOR_MS = 500
+FILE_INDICATOR_MS = 1500     # file name shown when switching with N/P
+AUTO_NEXT = False            # at end of file, open the next one in the folder
 BAR_HEIGHT = 40
 SKIP_SMALL = 10              # seconds (arrows)
 SKIP_LARGE = 60              # seconds (Shift+arrows)
@@ -18,8 +23,18 @@ VOLUME_STEP = 5
 PLAY_GLYPH = "▶︎"
 PAUSE_GLYPH = "⏸︎"
 
-VIDEO_FILTER = ("Videos (*.mp4 *.m4v *.mkv *.avi *.mov *.wmv *.webm *.flv *.ts "
-                "*.m2ts *.mpg *.mpeg *.3gp *.ogv);;All files (*)")
+VIDEO_EXTS = (".mp4", ".m4v", ".mkv", ".avi", ".mov", ".wmv", ".webm", ".flv", ".ts",
+              ".m2ts", ".mpg", ".mpeg", ".3gp", ".ogv")
+VIDEO_FILTER = "Videos (" + " ".join("*" + e for e in VIDEO_EXTS) + ");;All files (*)"
+
+# Resume positions
+POSITIONS_FILE = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"),
+                              "QuietPlayer", "positions.json")
+POSITIONS_MAX = 500
+SAVE_EVERY_MS = 10_000
+RESUME_MIN = 30              # seconds: below this counts as "not really started"
+FINISHED_FRACTION = 0.95     # past 95% ...
+FINISHED_TAIL = 60           # ... or within the last 60 s counts as "finished"
 
 # libmpv-2.dll may sit next to this script.
 _here = os.path.dirname(os.path.abspath(__file__))
@@ -28,7 +43,7 @@ if hasattr(os, "add_dll_directory"):
     os.add_dll_directory(_here)
 
 import mpv
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer
+from PySide6.QtCore import QEvent, QLocale, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel,
                                QMainWindow, QPushButton, QSlider, QStyle,
@@ -40,6 +55,89 @@ def fmt_time(t):
     t = int(t)
     h, m, s = t // 3600, t % 3600 // 60, t % 60
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def norm_path(path):
+    return os.path.normcase(os.path.abspath(path))
+
+
+def natural_key(name):
+    """'Episode 2' sorts before 'Episode 10'."""
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", name.casefold())]
+
+
+def folder_videos(path):
+    """Video files in path's folder, naturally sorted (path itself always included)."""
+    folder, base = os.path.split(os.path.abspath(path))
+    try:
+        names = [n for n in os.listdir(folder)
+                 if n.lower().endswith(VIDEO_EXTS) and os.path.isfile(os.path.join(folder, n))]
+    except OSError:
+        names = []
+    if base not in names:
+        names.append(base)
+    names.sort(key=lambda n: (natural_key(n), n))
+    return [os.path.join(folder, n) for n in names]
+
+
+def track_label(t):
+    # mpv titles external files with their filename suffix ("en.srt"); skip that.
+    if t.get("title") and not t.get("external"):
+        return t["title"]
+    lang = t.get("lang")
+    if lang:
+        code = QLocale.codeToLanguage(lang)
+        return QLocale.languageToString(code) if code != QLocale.AnyLanguage else lang
+    return f"Track {t.get('id')}"
+
+
+class PositionStore:
+    """Per-file resume positions in a small JSON file, most recently played last."""
+
+    def __init__(self, path=POSITIONS_FILE):
+        self.path = path
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            self.data = {k: v for k, v in data.items() if isinstance(v, dict) and "pos" in v}
+        except (OSError, ValueError, AttributeError):
+            self.data = {}
+
+    def get(self, key):
+        e = self.data.get(key)
+        return e["pos"] if e else None
+
+    def update(self, key, pos, dur):
+        """Store pos, or clear the entry if pos counts as 'not started' / 'finished'."""
+        finished = pos >= dur * FINISHED_FRACTION or pos >= dur - FINISHED_TAIL
+        if pos < RESUME_MIN or finished:
+            if self.data.pop(key, None) is not None:
+                self._write()
+            return
+        pos = round(pos, 1)
+        was_last = next(reversed(self.data), None) == key
+        old = self.data.pop(key, None)
+        self.data[key] = {"pos": pos, "t": int(time.time())}
+        while len(self.data) > POSITIONS_MAX:
+            del self.data[next(iter(self.data))]
+        if not (was_last and old and old["pos"] == pos):
+            self._write()
+
+    def _write(self):
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            tmp = self.path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self.data, f, ensure_ascii=False, indent=0)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+
+class MpvEvents(QObject):
+    """Carries mpv's thread callbacks over to the Qt thread."""
+    file_loaded = Signal()
+    eof = Signal(bool)
 
 
 class JumpSlider(QSlider):
@@ -186,8 +284,24 @@ class PlayerWindow(QMainWindow):
             osd_margin_x=14,
             osd_margin_y=10,
             osd_border_size=2,
+            sub_auto="exact",       # movie.srt, movie.en.srt next to the video
         )
         self.mpv.volume = 70
+
+        self.positions = PositionStore()
+        self.current = None        # path of the open file
+        self.loaded = False        # True once mpv has loaded self.current
+        self.resume_from = None    # start position passed to mpv for self.current
+        self.announce = None       # file name to show once loaded (N/P)
+        self.events = MpvEvents()
+        self.events.file_loaded.connect(self.on_file_loaded)
+        self.events.eof.connect(self.on_eof)
+        self.mpv.register_event_callback(self._mpv_event)
+        self.mpv.observe_property("eof-reached", lambda _n, v: self.events.eof.emit(bool(v)))
+
+        self.saver = QTimer(self)
+        self.saver.timeout.connect(self.save_position)
+        self.saver.start(SAVE_EVERY_MS)
 
         self.poll = QTimer(self)
         self.poll.timeout.connect(self.refresh)
@@ -211,12 +325,79 @@ class PlayerWindow(QMainWindow):
         self.set_bar_visible(True)
 
     # --- playback -----------------------------------------------------------
-    def open_file(self, path):
+    def open_file(self, path, announce=False):
         if not path:
             return
-        self.mpv.play(path)
+        self.save_position()
+        self.loaded = False
+        self.current = os.path.abspath(path)
+        self.resume_from = self.positions.get(norm_path(path))
+        self.announce = os.path.basename(path) if announce else None
+        if self.resume_from is not None:
+            self.mpv.loadfile(self.current, start=f"{self.resume_from:.3f}")
+        else:
+            self.mpv.loadfile(self.current)
         self.mpv.pause = False
         self.setWindowTitle(f"{os.path.basename(path)} — Quiet Player")
+
+    def _mpv_event(self, ev):   # mpv thread
+        if ev.event_id.value == mpv.MpvEventID.FILE_LOADED:
+            self.events.file_loaded.emit()
+
+    def on_file_loaded(self):
+        self.loaded = True
+        lines = [self.announce] if self.announce else []
+        if self.resume_from is not None:
+            lines.append(f"Resumed {fmt_time(self.resume_from)}")
+        if lines:
+            self.indicate("\n".join(lines), always=True,
+                          ms=FILE_INDICATOR_MS if self.announce else INDICATOR_MS)
+        self.announce = None
+
+    def on_eof(self, reached):
+        if reached and AUTO_NEXT and self.loaded:
+            self.step_file(1, quiet=True)
+
+    def save_position(self):
+        if not (self.current and self.loaded):
+            return
+        try:
+            pos, dur = self.mpv.time_pos, self.mpv.duration
+        except Exception:
+            return
+        if pos is not None and dur:
+            self.positions.update(norm_path(self.current), pos, dur)
+
+    def step_file(self, step, quiet=False):
+        if not self.current:
+            return
+        files = folder_videos(self.current)
+        keys = [norm_path(f) for f in files]
+        i = keys.index(norm_path(self.current)) + step
+        if 0 <= i < len(files):
+            self.open_file(files[i], announce=True)
+        elif not quiet:
+            self.indicate("Last file" if step > 0 else "First file", always=True)
+
+    def go_to_start(self):
+        if self.mpv.duration is None:
+            return
+        self.mpv.command("seek", 0, "absolute+exact")
+        self.indicate("Start", always=True)
+
+    def cycle_track(self, kind):
+        """kind is 'sub' or 'audio'. Subtitles cycle through 'off'; audio doesn't."""
+        name = "Subs" if kind == "sub" else "Audio"
+        prop = "sid" if kind == "sub" else "aid"
+        if not any(t.get("type") == kind for t in self.mpv.track_list or []):
+            self.indicate(f"{name}: none", always=True)
+            return
+        self.mpv.command("cycle", prop)
+        if kind == "audio" and self.mpv[prop] in (False, "no"):
+            self.mpv.command("cycle", prop)
+        sel = next((t for t in self.mpv.track_list or []
+                    if t.get("type") == kind and t.get("selected")), None)
+        self.indicate(f"{name}: {track_label(sel) if sel else 'off'}", always=True)
 
     def open_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open video", "", VIDEO_FILTER)
@@ -250,11 +431,12 @@ class PlayerWindow(QMainWindow):
         else:
             self.showFullScreen()
 
-    def indicate(self, text):
-        """Brief corner text, only while the bar is hidden. Drawn by mpv's OSD
-        renderer at level 0 (mpv's own OSD stays off via osd-level=0)."""
-        if SHOW_INDICATOR and not self.bar_visible:
-            self.mpv.command("show-text", text, INDICATOR_MS, 0)
+    def indicate(self, text, always=False, ms=INDICATOR_MS):
+        """Brief corner text. Drawn by mpv's OSD renderer at level 0 (mpv's own
+        OSD stays off via osd-level=0). Normally only while the bar is hidden;
+        always=True is for results the bar doesn't show (files, tracks, resume)."""
+        if SHOW_INDICATOR and (always or not self.bar_visible):
+            self.mpv.command("show-text", text, ms, 0)
 
     def refresh(self):
         m = self.mpv
@@ -315,6 +497,16 @@ class PlayerWindow(QMainWindow):
             return (self.toggle_fullscreen, False)
         if k == Qt.Key_Escape and none:
             return ((lambda: self.isFullScreen() and self.showNormal()), False)
+        if k == Qt.Key_Home and none:
+            return (self.go_to_start, False)
+        if k == Qt.Key_N and none:
+            return ((lambda: self.step_file(1)), False)
+        if k == Qt.Key_P and none:
+            return ((lambda: self.step_file(-1)), False)
+        if k == Qt.Key_S and none:
+            return ((lambda: self.cycle_track("sub")), False)
+        if k == Qt.Key_A and none:
+            return ((lambda: self.cycle_track("audio")), False)
         return None
 
     def dragEnterEvent(self, e):
@@ -329,6 +521,8 @@ class PlayerWindow(QMainWindow):
 
     def closeEvent(self, e):
         self.poll.stop()
+        self.saver.stop()
+        self.save_position()
         self.mpv.terminate()
         super().closeEvent(e)
 

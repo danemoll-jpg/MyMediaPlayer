@@ -39,13 +39,16 @@ updates to `TODO.md`/`CLAUDE.md` are often dropped into the repo between
 sessions). Then check `TODO.md` for the current objective. Never drop this
 rule when rewriting this file.
 
-Round 1 (first working player) is complete: everything lives in
-`quiet_player.py`. Current objective is **Round 2** in `TODO.md` (resume
-position, next/previous file in folder, subtitle/audio shortcuts). For each
-round, report a status for every numbered item individually, and batch the
-round into one set of changes.
+Rounds 1 (first working player) and 2 (resume, next/previous file,
+subtitle/audio shortcuts) are complete; everything lives in
+`quiet_player.py`. No next round is defined yet; see Next Steps in
+`TODO.md`. For each round, report a status for every numbered item
+individually, and batch the round into one set of changes.
 
 - `libmpv-2.dll` sits next to the script and is git-ignored, so a fresh clone
   needs it re-downloaded (source noted in `TODO.md`).
-- The corner indicator uses mpv `show-text` with level 0. It is the only
-  thing mpv draws apart from the video.
+- The corner indicator uses mpv `show-text` with level 0. Apart from the
+  video, it and subtitles are the only things mpv draws.
+- Resume positions live in `%APPDATA%\QuietPlayer\positions.json`. Tests
+  should point `APPDATA` at a scratch folder so the owner's file isn't
+  touched.

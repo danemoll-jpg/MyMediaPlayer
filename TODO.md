@@ -29,7 +29,44 @@ HEVC MKV (d3d11va hardware decode), MOV. Results per item:
 Launch behaviour: the bar starts visible on app launch (only), so a fresh
 window isn't a blank black box. After that, only the user changes it.
 
+**Round 2 — resume, folder navigation, subtitles/audio (2026-10-27).** All
+five items done in `quiet_player.py`. Verified on the owner's PC with real
+OS-level keyboard input (SendInput) and real process restarts, using
+synthetic test media made with ffmpeg (no real multi-track MKV was used):
+
+1. Done — `PositionStore` writes `%APPDATA%\QuietPlayer\positions.json`
+   (normcased full path keys, 500 most recent, atomic write). Saves on close,
+   on opening another file, and every 10 s. Under 30 s / last 5% / last 60 s
+   clears the entry. Resume uses mpv's per-file `start=` option; indicator
+   "Resumed 12:34". `Home` → start, indicator "Start". Tested: resume after a
+   full restart, after a simulated crash (lost ≤10 s), under-30s rule (Home
+   then switch), last-60s rule (180 s file), 95% rule (25 min file, 70 s from
+   the end), close-time save, 500 cap.
+2. Done — `N`/`P`, extensions from `VIDEO_EXTS` (now shared with the `Ctrl+O`
+   filter, case-insensitive), natural sort, no wrap ("Last file" /
+   "First file"). `AUTO_NEXT = False` constant; tested both values. Tested
+   through 12 numbered episodes + `Extra.MKV`, with `.srt`/`.txt` files
+   ignored, and resume through N/P.
+3. Done — `S` cycles subs including "off"; `A` cycles audio. **Decision:**
+   audio does not cycle through "off" (muting is what volume is for). Labels:
+   track title, else language name via QLocale ("jpn" → "Japanese"), else
+   "Track N". External `movie.srt` / `movie.en.srt` load via `sub-auto=exact`;
+   mpv auto-selects an external sub when present. Subtitles render with
+   `osd-level=0` (confirmed in mpv's own window screenshot).
+4. Done — `indicate(text, always=False, ms=...)`; `always=True` for resume,
+   Start, file name, First/Last file, sub/audio. File name on N/P shows 1.5 s
+   (`FILE_INDICATOR_MS`), with "Resumed …" as a second line when it resumes.
+   Volume indicator still suppressed while the bar is visible.
+5. Done — 46 checks, all passing in their final runs (resume 20, N/P 14,
+   tracks 11, Explorer drag 1). The resume and N/P runs came before the
+   external-sub label fix, which only touches track labels. The bar never appeared from any Round 2 action
+   (polled every 20 ms). A real Explorer → player drag (actual mouse,
+   UI Automation to find the item) opened the file.
+
 ## Current Objective (Focus Area)
+
+**No round defined yet.** Pick from Next Steps when the owner says so.
+Round 2 spec kept below for reference.
 
 **Round 2 — resume, folder navigation, subtitles/audio.** Build all of the
 items below in one round, then report back with an explicit status for EACH
@@ -122,6 +159,16 @@ particular, nothing in this round may make the control bar appear on its own.
 - **Design decision (RESOLVED):** the bar never overlays the video. In
   fullscreen this means the video shrinks slightly when the bar is shown.
   That trade-off was chosen deliberately.
+- **mpv quirks found in Round 2:** external subtitle tracks get a fake
+  `title` equal to the filename suffix (`de.srt`, `srt`), so `track_label`
+  ignores titles on external tracks. mpv events arrive on its own thread;
+  `MpvEvents` (Qt signals) hands them to the GUI thread.
+- **Testing notes:** Qt `grabWindow` and plain screen grabs return black (or
+  whatever window is in front) for the mpv surface; use mpv's
+  `screenshot-to-file <path> window` to see what it actually draws. Keyboard
+  tests use SendInput, so typing on the PC during a run causes false
+  failures. The Round 2 test harness lived in a session scratch folder and is
+  not in the repo.
 - **Design decision (RESOLVED 2026-10-27):** the bar is visible when the app
   first opens. Owner confirmed this is what he wants. After launch, only the
   user changes its visibility.
