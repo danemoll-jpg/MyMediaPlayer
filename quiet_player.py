@@ -44,15 +44,18 @@ INSTANCE_NAME = "QuietPlayer-" + (os.environ.get("USERNAME") or os.environ.get("
 
 EMPTY_HINT = "Click here or press Ctrl+O to open a video\n(or drag one onto this window)"
 
-# libmpv-2.dll may sit next to this script.
-_here = os.path.dirname(os.path.abspath(__file__))
+# libmpv-2.dll and the icon sit next to this script, or next to QuietPlayer.exe
+# when packaged (PyInstaller one-folder build with its contents beside the .exe).
+FROZEN = getattr(sys, "frozen", False)
+_here = os.path.dirname(sys.executable if FROZEN else os.path.abspath(__file__))
+ICON_FILE = os.path.join(_here, "quiet_player.ico")
 os.environ["PATH"] = _here + os.pathsep + os.environ.get("PATH", "")
 if hasattr(os, "add_dll_directory"):
     os.add_dll_directory(_here)
 
 import mpv
 from PySide6.QtCore import QEvent, QLocale, QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QPainter
+from PySide6.QtGui import QColor, QIcon, QKeyEvent, QPainter
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel,
                                QMainWindow, QMenu, QMessageBox, QPushButton,
@@ -679,7 +682,17 @@ def listen_for_other_instances(window):
 
 
 def main():
+    if "--register" in sys.argv[1:]:
+        # Used by install.bat: point the existing registration at this program,
+        # in place (same ProgID, so the user's default-app choices stay). No window.
+        try:
+            default_player.register(list(VIDEO_EXTS))
+        except OSError:
+            sys.exit(1)
+        sys.exit(0)
     app = QApplication(sys.argv)
+    if os.path.exists(ICON_FILE):
+        app.setWindowIcon(QIcon(ICON_FILE))
     path = sys.argv[1] if len(sys.argv) > 1 else None
     if hand_to_running_instance(path):
         return

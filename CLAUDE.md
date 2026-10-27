@@ -27,12 +27,15 @@
 - Never bind anything to mouse side buttons (owner has them disabled).
 - Keep it small: `quiet_player.py` is the app; `default_player.py` holds the
   Windows registry code for "make default" (HKCU only, never touch other
-  apps' associations).
+  apps' associations). `make_icon.py` draws `quiet_player.ico`;
+  `install.bat` builds the .exe and installs it.
 
 ## Commands
 ```
-pip install PySide6 python-mpv
-python quiet_player.py [optional path to video]
+pip install PySide6 python-mpv pyinstaller pillow
+python quiet_player.py [optional path to video]   # run from source (dev)
+install.bat                    # build + install to %LOCALAPPDATA%\Programs\QuietPlayer
+QuietPlayer.exe --register     # point QuietPlayer.Video at this exe, no window
 ```
 
 ## Where things stand
@@ -42,11 +45,24 @@ sessions). Then check `TODO.md` for the current objective. Never drop this
 rule when rewriting this file.
 
 Rounds 1, 2 and 3 are complete, verified on the owner's PC, and committed.
-Current objective is **Round 4** in `TODO.md`: package as an installed .exe
-with an icon and Start menu entry. Quiet Player is already the owner's
-default video player; keep the ProgID `QuietPlayer.Video` and never
-unregister. For each round, report a status for every numbered item
-individually, and batch the round into one set of changes.
+**Round 4** (installed .exe, icon, Start menu) is built and committed but
+**not complete**: the real registration still points at pythonw + the repo
+script, because the `--register` run from a Claude session was virtualized
+(see below). The owner needs to double-click `install.bat` once, then the
+Explorer checks in `TODO.md` ("To finish Round 4") must pass. Quiet Player
+is already the owner's default video player; keep the ProgID
+`QuietPlayer.Video` and never unregister. For each round, report a status
+for every numbered item individually, and batch the round into one set of
+changes.
+
+- **Registry writes from a Claude Code session never reach the real
+  registry.** They go to a private copy that only the session's own
+  processes see, so in-session `reg query`, PowerShell and
+  `AssocQueryString` will happily show your writes. File writes are real. To
+  see what Windows really has, read it from a process Explorer starts (e.g.
+  a probe `.bat` double-clicked in a test Explorer window that runs
+  `reg query` into a file). Any real registration change (`install.bat`,
+  `--register`) has to be run by the owner from Explorer.
 
 - Real-input tests (SendInput) must check, before every click or key, that
   the target window belongs to the test, and abort otherwise. The owner's
@@ -62,3 +78,9 @@ individually, and batch the round into one set of changes.
 - Resume positions live in `%APPDATA%\QuietPlayer\positions.json`. Tests
   should point `APPDATA` at a scratch folder so the owner's file isn't
   touched.
+- The owner's default-app choice lives in
+  `FileExts\<ext>\UserChoiceLatest\ProgId` on this Windows build (25H2).
+  The older `UserChoice` key is stale and not what Windows uses.
+- In batch files, call Windows tools by full path
+  (`%SystemRoot%\System32\find.exe` etc.): Git's GNU `find` can come first
+  on PATH.

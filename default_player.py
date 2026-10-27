@@ -22,7 +22,7 @@ SHCNE_ASSOCCHANGED = 0x08000000
 
 def launch_command():
     """Command line Windows runs to open a file: '"<exe>" ["<script>"] "%1"'."""
-    if getattr(sys, "frozen", False):        # packaged .exe (later round)
+    if getattr(sys, "frozen", False):        # installed QuietPlayer.exe
         return f'"{sys.executable}" "%1"'
     exe = sys.executable
     pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
@@ -33,6 +33,12 @@ def launch_command():
 
 
 def _icon():
+    """File-type icon: the .exe's own icon, or quiet_player.ico when run from source."""
+    if getattr(sys, "frozen", False):
+        return f'"{sys.executable}",0'
+    ico = os.path.join(os.path.dirname(os.path.abspath(__file__)), "quiet_player.ico")
+    if os.path.exists(ico):
+        return f'"{ico}",0'
     exe = sys.executable
     pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
     return f'"{pyw if os.path.exists(pyw) else exe}",0'

@@ -120,69 +120,111 @@ or their coordinates won't match UI Automation at 150%+ scaling.
 
 ## Current Objective (Focus Area)
 
-**Round 4 — a real installed app: .exe, icon, Start menu.** Build all of the
-items below in one round, then report back with an explicit status for EACH
-numbered item (done / not done / deferred, and why). Do not mark the round
-complete if any item was skipped.
+**Round 4 — a real installed app: .exe, icon, Start menu. NOT complete:**
+built and tested 2026-10-27, but the switch of the real registration to the
+.exe (item 4) did not happen. Remaining work is in "To finish Round 4" below.
 
-**Critical:** the owner has ALREADY made Quiet Player his default video
-player (Settings > Default apps, 2026-10-27), and Windows stores that choice
-against the ProgID `QuietPlayer.Video`. Keep that ProgID name exactly. Never
-call `unregister()` / "Remove", and never remove-and-re-add while testing:
-that silently drops his defaults. Re-registering in place (`register()`
-overwriting the command) is safe and is how the switch to the .exe happens.
+**Critical (unchanged):** the owner's defaults are stored against the ProgID
+`QuietPlayer.Video` (in `UserChoiceLatest\ProgId` on this build; the older
+`UserChoice` key still names the Media Player app and is NOT what Windows
+uses). Keep that ProgID. Never call `unregister()` / "Remove", and never
+remove-and-re-add. Re-registering in place (`register()` overwriting the
+command) is safe.
 
-1. **Icon (owner chose option "B", 2026-10-27).** A rounded square in deep
-   blue (#1f3a5f) with a large plain white play triangle, centred, nothing
-   else. Corner radius about 19% of the size, small transparent margin. Must
-   read clearly at 16×16. Generate it with a small script
-   (`make_icon.py`, Pillow) into `quiet_player.ico` with sizes 16, 24, 32,
-   48, 64, 128, 256, and commit both. Use it for the window/taskbar icon
-   (`setWindowIcon`), the .exe, the Start menu shortcut, and the file-type
-   icon (`DefaultIcon` → `"<exe>",0`).
+**Blocker found: registry writes from a Claude Code session are virtualized.**
+The session runs under the Claude desktop app's package, and its HKCU
+registry writes land in a private copy. The session's own processes then
+read back its writes, but Explorer and every other app see the real,
+unchanged registry. File writes are real (the installed exe and the Start
+menu shortcut exist for Explorer). How this showed up: after
+`QuietPlayer.exe --register`, `AssocQueryString`, `reg query` and PowerShell
+(even unsandboxed) all showed the .exe command. But a real Explorer
+double-click on .mp4/.mkv still started `pythonw.exe quiet_player.py`, even
+from a fresh `explorer /separate` process, and a `.bat` started by Explorer
+read the old command. To see the real registry from a session, have Explorer
+launch a probe (`.bat` double-clicked in a test Explorer window) that runs
+`reg query` into a file. Don't trust the session's own reads. The session's
+private copy now holds the .exe registration. It's harmless, but it makes
+in-session reads look "done". Don't try to delete it from the session:
+deleting the ProgID is exactly what must never happen to the real one.
 
-2. **Package as an .exe with PyInstaller, one-folder mode** (not one-file:
-   one-file unpacks ~120 MB to a temp folder on every launch, which would
-   make opening a video slow). Windowed, no console. Bundle `libmpv-2.dll`.
-   Fix any frozen-mode paths (the DLL lookup in `quiet_player.py` uses
-   `__file__`; when frozen use the .exe's folder). Output:
-   `dist\QuietPlayer\QuietPlayer.exe`. `build\` and `dist\` are git-ignored.
+Per-item status (2026-10-27):
 
-3. **Install to a fixed location** outside the repo:
-   `%LOCALAPPDATA%\Programs\QuietPlayer\`. Rebuilding or moving the repo must
-   never break double-clicking videos again. Add a Start menu shortcut
-   "Quiet Player" (`%APPDATA%\Microsoft\Windows\Start Menu\Programs`) with
-   the icon. No desktop shortcut.
+1. **Done, apart from the file-type icon.** `make_icon.py` (Pillow, 4x
+   supersampled per size, vertical edge snapped to the pixel grid) writes
+   `quiet_player.ico` at 16, 24, 32, 48, 64, 128 and 256 px; checked at 16 px
+   on light and dark. Used for the window/taskbar (`app.setWindowIcon`), the
+   .exe (`--icon`) and the Start menu shortcut, all checked by screenshot.
+   `register()` now writes `DefaultIcon` = `"<exe>",0` when frozen (from
+   source: the repo's .ico). Not in effect yet: the real `DefaultIcon` is
+   still pythonw's, same blocker as item 4.
+2. **Done.** PyInstaller 6.22.3, one-folder, windowed, built by `install.bat`.
+   `--contents-directory .` puts libmpv-2.dll and the rest beside the exe;
+   `quiet_player.py` uses the exe's folder when `sys.frozen`. PIL, numpy and
+   tkinter are excluded (python-mpv only wants them for raw screenshots):
+   279 MB down to 239 MB, of which 121 MB is libmpv. Output
+   `dist\QuietPlayer\QuietPlayer.exe`; `build\`, `dist\` git-ignored (the
+   spec file is generated into `build\`).
+3. **Done.** Installed to `%LOCALAPPDATA%\Programs\QuietPlayer\` (robocopy
+   /MIR). Shortcut `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Quiet
+   Player.lnk` with the exe's icon. No desktop shortcut. Both confirmed
+   visible to Explorer.
+4. **Not done (blocked).** `--register` added: it calls `register()` and exits
+   with no window and no Settings page (exit code 1 on failure). It ran, but
+   its writes were virtualized (see blocker). Real state, read through
+   Explorer: the command and `DefaultIcon` still point at
+   `pythonw.exe` + `C:\Users\danmo\MyMediaPlayer\quiet_player.py`, so
+   double-clicking still runs from source. All 14 extensions'
+   `UserChoiceLatest` still say `QuietPlayer.Video`. Real Explorer
+   double-clicks on .mp4 and .mkv were done: they open Quiet Player, but from
+   source, not the exe.
+5. **Done.** `install.bat`: finds Python, checks PySide6/python-mpv and
+   libmpv-2.dll, installs PyInstaller if missing, builds, closes a running
+   QuietPlayer.exe with a normal close (no /F, so it saves its position;
+   waits up to ~10 s, else tells the owner to close it and stops), copies,
+   runs `--register`, and rewrites the shortcut. Tested twice in a row, the
+   first run with the exe playing: it closed the player (position saved) and
+   both runs exited 0, about 65–90 s each. Two bugs found and fixed: plain
+   `find` resolved to Git's GNU find, so a running player went undetected
+   (Windows tools are now called by full System32 path); and robocopy's
+   default retries (1,000,000 × 30 s) hung on the locked exe (now
+   `/R:2 /W:1`). CRLF is enforced via `.gitattributes`.
+6. **Done.** `Start Quiet Player.bat` deleted (nothing referenced it; the
+   real registration calls pythonw directly). Running from source still
+   works (4/4 launches in the timing test).
+7. **Partly done.** On the owner's PC, against the installed exe, with
+   `APPDATA` pointed at a scratch folder and guarded input. Passed:
+   - Start menu shortcut opens the installed exe (launched the way the Start
+     menu does, via ShellExecute of the .lnk; the Start menu UI itself was
+     not clicked). New icon in the taskbar and title bar.
+   - Startup to window with the file loading, warm, median of 3: source
+     1.55 s, exe 1.50 s (no real difference). The first exe launch after an
+     install was ~6.5 s (cold disk cache).
+   - Resume from the stored position; the 30 s / last-60 s rules.
+   - `settings.json`: Open dialog starts in `last_dir`, which is rewritten
+     after choosing a file.
+   - Tab, middle-click and left-click bar behaviour; mouse movement does not
+     show the bar.
+   - F / Esc fullscreen; Space pause; → seek; N next file (with resume).
+   - Single-window hand-off between two exe launches: the second exits, the
+     same window takes the file and stays in front.
+   - `install.bat` run twice in a row works.
+   - Defaults never changed (checked through Explorer).
 
-4. **Switch the existing registration to the .exe, in place.** Add a
-   `--register` command-line flag that calls `register()` silently and exits
-   (no window, no Settings page). After installing, run the installed
-   `QuietPlayer.exe --register`. Then confirm, without touching Settings or
-   UserChoice: the `QuietPlayer.Video` command now points at the installed
-   .exe; `.mp4` and `.mkv` UserChoice still say `QuietPlayer.Video`; a real
-   Explorer double-click on an .mp4 and an .mkv opens the installed .exe
-   (allowed this round, since it changes no associations); Explorer shows
-   the new icon on video files (may need a shell refresh).
+   Not passed: a real Explorer double-click opening the *exe*, and Explorer
+   showing the new file icon. Both are blocked on item 4.
 
-5. **One-step update script: `install.bat`** in the repo. It builds with
-   PyInstaller, closes a running Quiet Player if there is one (or tells the
-   owner to close it and stops), copies `dist\QuietPlayer` to the install
-   folder, runs `--register`, and refreshes the Start menu shortcut. This is
-   how every future round gets onto the owner's PC. Running it twice in a
-   row must be safe.
+### To finish Round 4
 
-6. **Retire `Start Quiet Player.bat`.** It was a stop-gap added from the
-   planning session (2026-10-27) because double-clicking the .py flashed and
-   closed. Delete it once the installed .exe works. Running from source
-   (`python quiet_player.py`) must still work for development.
-
-7. **Verification before reporting** on the real PC: the installed .exe
-   launches from the Start menu with the new icon in the taskbar; startup
-   time from double-click to video is noted (old vs new, roughly); resume
-   positions, `settings.json` and every Round 1–3 behaviour still work from
-   the .exe (spot-check, not a full retest); single-window hand-off works
-   between two .exe launches; `install.bat` run twice in a row works; and
-   the owner's defaults were never changed or removed.
+1. Owner: double-click `install.bat` in the repo folder (in Explorer, not
+   from a Claude session) and wait for "Quiet Player is installed". This
+   rebuilds and runs the real `--register`.
+2. Then verify through Explorer (not with in-session reads): the
+   `QuietPlayer.Video` command and `DefaultIcon` point at the installed exe;
+   all 14 `UserChoiceLatest\ProgId` still say `QuietPlayer.Video`; a real
+   double-click on .mp4 and .mkv starts `QuietPlayer.exe` (parent explorer);
+   video files show the new icon (`ie4uinit -show` if not).
+3. If all pass, Round 4 is complete.
 
 ## Next Steps (Do Not Start Yet)
 
