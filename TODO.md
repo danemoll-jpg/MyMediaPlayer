@@ -31,75 +31,69 @@ window isn't a blank black box. After that, only the user changes it.
 
 ## Current Objective (Focus Area)
 
-**Round 1 — COMPLETE (see Completed Tasks). Next round not yet defined; pick
-from Next Steps when the owner says so.** Original round 1 spec kept below
-for reference.
+**Round 2 — resume, folder navigation, subtitles/audio.** Build all of the
+items below in one round, then report back with an explicit status for EACH
+numbered item (done / not done / deferred, and why). Do not mark the round
+complete if any item was skipped. All Round 1 rules still apply — in
+particular, nothing in this round may make the control bar appear on its own.
 
-**Round 1 — first working player.** Build all of the items below in one round,
-then report back with an explicit status for EACH numbered item
-(done / not done / deferred, and why). Do not mark the round complete if any
-item was skipped.
+1. **Resume where you left off.** Remember the playback position per file and
+   resume there the next time that file is opened (any way: drag-drop,
+   `Ctrl+O`, command line, next/previous).
+   - Store positions in a small JSON file at
+     `%APPDATA%\QuietPlayer\positions.json`, keyed by the file's full
+     normalized path. Keep only the 500 most recently played entries.
+   - Save the current position when the app closes, when another file is
+     opened, and every ~10 seconds during playback (so a crash loses little).
+   - Don't save (and clear any saved entry) if the position is under 30
+     seconds, or within the last 5% or last 60 seconds of the file — that
+     counts as "not really started" or "finished".
+   - On resume, show the indicator "Resumed 12:34".
+   - `Home` jumps back to the start of the current file (indicator
+     "Start").
 
-1. **App skeleton + playback engine.** Windows desktop app using Python,
-   PySide6 and python-mpv (libmpv embedded in a Qt widget). Disable all of
-   mpv's built-in UI and input: `osc=no`, `osd-level=0`,
-   `input-default-bindings=no`, `input-vo-keyboard=no`, `input-cursor=no`.
-   All controls and shortcuts are handled by the app, not by mpv.
+2. **Next / previous file in the same folder.** `N` opens the next video file
+   in the current file's folder, `P` the previous one.
+   - Only video extensions (same list as the `Ctrl+O` filter).
+   - Natural sort order, so "Episode 2" comes before "Episode 10".
+   - No wrap-around: at either end show the indicator "Last file" /
+     "First file" and do nothing.
+   - The new file follows item 1's resume rule, and the current file's
+     position is saved before switching.
+   - Add a constant `AUTO_NEXT = False` at the top of the code. When `True`,
+     reaching the end of a file opens the next one automatically. Default
+     stays off (current behaviour: stop on the last frame).
 
-2. **Opening files.** Three ways: drag-and-drop a file onto the window,
-   `Ctrl+O` file dialog, and a file path passed on the command line (so
-   Windows "Open with" works). Must play common local formats: MP4, MKV, AVI,
-   MOV, WMV, WebM, including HEVC/H.265.
+3. **Subtitle and audio-track shortcuts.**
+   - `S` cycles subtitle tracks, including "off". Indicator shows the result,
+     e.g. "Subs: English" / "Subs: off" (use the track title or language;
+     fall back to "Track 2").
+   - `A` cycles audio tracks the same way: "Audio: Japanese".
+   - External subtitle files next to the video with the same name
+     (e.g. `movie.srt`, `movie.en.srt`) load automatically.
+   - Subtitles themselves are rendered by mpv as normal; `osd-level=0` must
+     not hide them.
 
-3. **Control bar placement — never covers the video.** The bar sits in its own
-   strip below the video area, never overlaid on it. When the bar is shown,
-   the video area shrinks to fit above it; when hidden, the video uses the
-   full window/screen. Same rule in fullscreen. Bar contents: play/pause,
-   skip back, skip ahead, seek slider, current time / duration, volume.
-   Keep it thin (roughly 40px).
+4. **Indicator rule update.** For actions whose result does NOT show on the
+   control bar (resume, Start, next/previous file name, First/Last file,
+   subtitle and audio track changes), show the indicator even while the bar
+   is visible. All other indicators keep the Round 1 rule (only while the bar
+   is hidden). `SHOW_INDICATOR = False` still turns every indicator off. When
+   switching files with N/P, show the new file name for ~1.5 seconds instead
+   of 0.5.
 
-4. **Hiding — instant.** The toggle key (`Tab`) hides the bar immediately.
-   Left-clicking on the video while the bar is visible also hides it.
-   No fade or animation.
-
-5. **Never reappears on its own.** The bar must NOT show on mouse movement,
-   hover, pause, opening a file, end of file, or entering/leaving fullscreen.
-   Its visible/hidden state persists until the user toggles it. Only two
-   things show it: the `Tab` key, or middle-click on the video.
-   Do NOT use mouse side buttons (back/forward) for anything — the owner has
-   them disabled.
-
-6. **Keyboard shortcuts — work whether the bar is shown or hidden.**
-   - `Space` — play/pause
-   - `←` / `→` — skip back / ahead 10 seconds
-   - `Shift+←` / `Shift+→` — skip back / ahead 60 seconds
-   - `↑` / `↓` — volume up / down
-   - `F` or double-click on video — toggle fullscreen
-   - `Esc` — exit fullscreen
-   - `Tab` — show/hide control bar
-   - `Ctrl+O` — open file
-   Keyboard focus must not get stuck on a bar widget (e.g. Space pressing a
-   focused button instead of play/pause, or arrows moving the slider instead
-   of skipping). Shortcuts are handled at the window level.
-
-7. **Minimal feedback while the bar is hidden.** When a shortcut is used with
-   the bar hidden, show a tiny text indicator in a corner ("+10s", "−60s",
-   "⏸", "▶", "Vol 70%") for about 0.5 seconds, then remove it. Make it easy
-   to turn off with a single constant/setting at the top of the code.
-
-8. **Verification before reporting.** Test on the real Windows 11 PC with at
-   least one MP4 and one MKV (HEVC if available). Specifically confirm:
-   middle-click and left-click on the video actually reach the app (see the
-   embedding note under Technical Notes), and the bar never appears after
-   mouse movement, pausing, or opening a new file.
+5. **Verification before reporting.** Test on the real PC:
+   - Resume across a full app restart, plus the under-30s and near-the-end
+     rules.
+   - N/P through a folder with at least 10 numbered files to prove natural
+     sort, and the First/Last file ends.
+   - `S` and `A` on an MKV with more than one subtitle and audio track if
+     available (say so if no such file was found), plus an external `.srt`.
+   - Confirm the control bar never appears from any Round 2 action.
+   - Do one real drag from File Explorer (left over from Round 1).
 
 ## Next Steps (Do Not Start Yet)
 
-- **Remember last position per file / resume playback** — useful, but not
-  part of the core ask; deferred until round 1 is confirmed working.
-- **Playlist / next-previous file in folder** — deferred, same reason.
-- **Subtitle and audio-track selection shortcuts** — deferred; mpv supports
-  both, so this is a small add later.
 - **Configurable key bindings** — deferred; hard-coded defaults first.
 - **Packaging as a standalone .exe (PyInstaller) and registering as an
   "Open with" option** — deferred until the player itself is right.
@@ -128,3 +122,6 @@ item was skipped.
 - **Design decision (RESOLVED):** the bar never overlays the video. In
   fullscreen this means the video shrinks slightly when the bar is shown.
   That trade-off was chosen deliberately.
+- **Design decision (RESOLVED 2026-10-27):** the bar is visible when the app
+  first opens. Owner confirmed this is what he wants. After launch, only the
+  user changes its visibility.
