@@ -118,11 +118,12 @@ raise another app's window, so Explorer was not driven directly. Test
 harnesses that run without Qt must call `SetProcessDpiAwarenessContext(-4)`
 or their coordinates won't match UI Automation at 150%+ scaling.
 
-## Current Objective (Focus Area)
-
-**Round 4 — a real installed app: .exe, icon, Start menu. NOT complete:**
-built and tested 2026-10-27, but the switch of the real registration to the
-.exe (item 4) did not happen. Remaining work is in "To finish Round 4" below.
+**Round 4 — a real installed app: .exe, icon, Start menu. COMPLETE
+(2026-10-27).** The coding agent built and tested items 1–3 and 5–7; item 4
+was blocked by registry virtualization (below). The owner then ran
+`install.bat` from Explorer himself, and confirmed double-clicking a video
+opens the installed .exe with the new icon. The per-item notes below are
+the agent's report from before that final step.
 
 **Critical (unchanged):** the owner's defaults are stored against the ProgID
 `QuietPlayer.Video` (in `UserChoiceLatest\ProgId` on this build; the older
@@ -214,7 +215,7 @@ Per-item status (2026-10-27):
    Not passed: a real Explorer double-click opening the *exe*, and Explorer
    showing the new file icon. Both are blocked on item 4.
 
-### To finish Round 4
+#### To finish Round 4 (done by the owner, 2026-10-27)
 
 1. Owner: double-click `install.bat` in the repo folder (in Explorer, not
    from a Claude session) and wait for "Quiet Player is installed". This
@@ -225,6 +226,68 @@ Per-item status (2026-10-27):
    double-click on .mp4 and .mkv starts `QuietPlayer.exe` (parent explorer);
    video files show the new icon (`ie4uinit -show` if not).
 3. If all pass, Round 4 is complete.
+
+## Current Objective (Focus Area)
+
+**Round 5 — speed, frame stepping, mute, remembered volume, recent files.**
+Build all of the items below in one round, then report back with an explicit
+status for EACH numbered item (done / not done / deferred, and why). Do not
+mark the round complete if any item was skipped. All earlier rules still
+apply: nothing may make the control bar appear on its own, shortcuts work
+with the bar shown or hidden, and bar widgets never take keyboard focus.
+Quiet Player is the owner's default player: keep ProgID `QuietPlayer.Video`,
+never unregister.
+
+New keys don't clash with existing ones (Space, arrows, Shift+arrows, ↑/↓,
+F, Esc, Tab, Ctrl+O, Home, N, P, S, A).
+
+1. **Playback speed.** `]` faster, `[` slower, stepping through 0.5×,
+   0.75×, 1×, 1.25×, 1.5×, 1.75×, 2× (stop at the ends). `Backspace` resets
+   to 1×. Audio pitch stays normal (mpv's default `audio-pitch-correction`;
+   confirm it isn't off). Indicator "Speed 1.25×" shown even with the bar
+   visible, since the bar doesn't show speed. Speed carries over to the next
+   file in the same session (useful for a talky series with N), and is not
+   remembered after closing the app. When a file opens at a speed other than
+   1×, add "Speed 1.5×" to its open indicator so it's never a surprise.
+
+2. **Frame-by-frame.** `.` steps one frame forward, `,` one frame back
+   (mpv `frame-step` / `frame-back-step`). Stepping pauses playback if it
+   was playing. Holding the key repeats. No indicator (the frame itself is
+   the feedback).
+
+3. **Mute.** `M` toggles mute (mpv `mute`, separate from volume, so
+   unmuting returns to the same level). The bar's volume icon shows 🔇 while
+   muted. Indicator "Muted" / "Unmuted" follows the Round 1 rule (only while
+   the bar is hidden), since the bar shows it. Clicking the volume icon on
+   the bar also toggles mute. Changing volume with ↑/↓ while muted unmutes.
+
+4. **Remember volume.** Save the volume level in
+   `%APPDATA%\QuietPlayer\settings.json` when it changes (debounced, e.g.
+   1 s after the last change) and on close; start at the saved level
+   instead of 70%. Mute is NOT remembered: the app always starts unmuted.
+
+5. **Recent files.** A "Recent" submenu in the ⋯ menu with the 10 most
+   recently opened files (file name only, full path as tooltip), newest
+   first, then a separator and "Clear list". Files that no longer exist are
+   left out of the menu. Stored in `settings.json`. Opening any file by any
+   route (dialog, drag-drop, double-click in Explorer, N/P, Recent) moves it
+   to the top. Choosing a recent file follows the Round 2 resume rule.
+
+6. **Help line.** Update the tooltips and the ⋯ menu so the new keys are
+   discoverable: add a "Keyboard shortcuts" item in the ⋯ menu that shows a
+   small dialog listing every shortcut. Keys must not trigger player actions
+   while that dialog is open.
+
+7. **Install and verify.** Build with `install.bat` for testing, but the
+   owner must run `install.bat` from Explorer himself at the end (registry
+   writes from a session are virtualized; see Round 4). Test from source and
+   from the built exe with `APPDATA` pointed at a scratch folder: each speed
+   step and both ends, Backspace, pitch sounds normal (check with a tone or
+   speech file), speed carries to the next file, frame step both directions
+   while playing and paused, mute via M, icon and click, ↑ unmutes, volume
+   restored after restart, mute not restored, Recent order/missing-file/
+   Clear list, the shortcuts dialog, and the bar never appears from any
+   Round 5 action.
 
 ## Next Steps (Do Not Start Yet)
 

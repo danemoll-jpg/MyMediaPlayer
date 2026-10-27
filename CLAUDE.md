@@ -44,16 +44,14 @@ updates to `TODO.md`/`CLAUDE.md` are often dropped into the repo between
 sessions). Then check `TODO.md` for the current objective. Never drop this
 rule when rewriting this file.
 
-Rounds 1, 2 and 3 are complete, verified on the owner's PC, and committed.
-**Round 4** (installed .exe, icon, Start menu) is built and committed but
-**not complete**: the real registration still points at pythonw + the repo
-script, because the `--register` run from a Claude session was virtualized
-(see below). The owner needs to double-click `install.bat` once, then the
-Explorer checks in `TODO.md` ("To finish Round 4") must pass. Quiet Player
-is already the owner's default video player; keep the ProgID
-`QuietPlayer.Video` and never unregister. For each round, report a status
-for every numbered item individually, and batch the round into one set of
-changes.
+Rounds 1–4 are complete and the installed .exe is the owner's default
+video player (ProgID `QuietPlayer.Video`; keep it, never unregister). Current
+objective is **Round 5** in `TODO.md` (speed, frame step, mute,
+remembered volume, recent files, shortcuts dialog). Updates reach the owner's PC by him
+double-clicking `install.bat` in Explorer: registry writes from a Claude Code
+session are virtualized and never reach Explorer. For each round, report a
+status for every numbered item individually, and batch the round into one
+set of changes.
 
 - **Registry writes from a Claude Code session never reach the real
   registry.** They go to a private copy that only the session's own
