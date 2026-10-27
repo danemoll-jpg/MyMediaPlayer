@@ -478,8 +478,9 @@ class PlayerWindow(QMainWindow):
             self, "Quiet Player",
             "Quiet Player is now registered with Windows as a video player.\n\n"
             "Windows doesn't let apps make themselves the default, so Settings "
-            "will open next. Click \"Set default\" at the top of the Quiet Player "
-            "page (or pick it for each file type you want).\n\n"
+            "will open next on Default apps. Under \"Set defaults for applications\", "
+            "search for Quiet Player, open it and click \"Set default\" at the top "
+            "(or pick it for each file type you want).\n\n"
             "Another way: right-click any video, Open with > Choose another app > "
             "Quiet Player, and tick \"Always\".")
         default_player.open_default_apps_settings()
@@ -641,6 +642,11 @@ def hand_to_running_instance(path):
     sock.connectToServer(INSTANCE_NAME)
     if not sock.waitForConnected(300):
         return False
+    if sys.platform == "win32":
+        # We were launched by Explorer, which let us take the foreground. Pass that
+        # on, or Windows only flashes the running window's taskbar button.
+        import ctypes
+        ctypes.windll.user32.AllowSetForegroundWindow(-1)   # ASFW_ANY
     sock.write((os.path.abspath(path) if path else "").encode("utf-8"))
     sock.flush()
     sock.waitForBytesWritten(1000)

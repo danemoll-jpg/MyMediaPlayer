@@ -41,12 +41,17 @@ updates to `TODO.md`/`CLAUDE.md` are often dropped into the repo between
 sessions). Then check `TODO.md` for the current objective. Never drop this
 rule when rewriting this file.
 
-Rounds 1 and 2 are complete and committed. Current objective is **Round 3**
-in `TODO.md` (open-file button/empty state, ⋯ menu, default-player
-registration, single window). Its code was written by the planning session
-and is NOT yet verified on Windows — item 5 is yours. For each round, report
-a status for every numbered item individually, and batch the round into one
-set of changes.
+Rounds 1, 2 and 3 are complete, verified on the owner's PC, and committed.
+No new round is set yet; check `TODO.md` for the next objective. For each
+round, report a status for every numbered item individually, and batch the
+round into one set of changes.
+
+- Real-input tests (SendInput) must check, before every click or key, that
+  the target window belongs to the test, and abort otherwise. The owner's
+  other windows may be in front.
+- Never click "Set default" in Settings or otherwise change the owner's real
+  file associations during tests. Use a throwaway extension mapped to
+  `QuietPlayer.Video` instead.
 
 - `libmpv-2.dll` sits next to the script and is git-ignored, so a fresh clone
   needs it re-downloaded (source noted in `TODO.md`).

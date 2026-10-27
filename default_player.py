@@ -108,17 +108,26 @@ def unregister(exts):
 
 
 def is_registered():
+    """True if any registration exists, even one pointing at an old Python/script
+    path, so "Remove" stays available to clean it up."""
     try:
         import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, CLASSES + PROG_ID + r"\shell\open\command") as k:
-            value, _ = winreg.QueryValueEx(k, "")
-        return value == launch_command()
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTERED_APPS) as k:
+            winreg.QueryValueEx(k, APP_NAME)
+        return True
     except (ImportError, OSError):
+        pass
+    try:
+        winreg.OpenKey(winreg.HKEY_CURRENT_USER, CLASSES + PROG_ID).Close()
+        return True
+    except OSError:
         return False
 
 
 def open_default_apps_settings():
-    """Open Settings > Default apps on Quiet Player's own page."""
+    """Open Settings > Default apps. The registeredAppUser parameter is meant to jump
+    to Quiet Player's own page, but Windows 11 25H2 (build 26200) ignores it and
+    shows the Default apps list, so the message tells the user to search there."""
     uri = "ms-settings:defaultapps?registeredAppUser=" + APP_NAME.replace(" ", "%20")
     try:
         os.startfile(uri)

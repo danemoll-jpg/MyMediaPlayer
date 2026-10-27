@@ -63,64 +63,66 @@ synthetic test media made with ffmpeg (no real multi-track MKV was used):
    (polled every 20 ms). A real Explorer → player drag (actual mouse,
    UI Automation to find the item) opened the file.
 
+**Round 3 — open files from the app, "make Quiet Player my default", one
+window (2026-10-27).** Code for items 1–4 was written by the planning session
+without Windows; the coding agent verified it on the owner's PC (item 5) with
+real OS input (SendInput) and synthetic ffmpeg media, `APPDATA` pointed at a
+scratch folder. 66 checks, all passing in their final runs. Two bugs fixed,
+one Windows limitation found:
+
+1. Done — 📂 leftmost, ⋯ rightmost. Empty-state hint renders on screen (screen
+   grab); after load mpv's child window covers the whole video area. Clicking
+   the empty area opens the native Open dialog; with a file open, left-click
+   hides the bar instead. Dialog starts in the current file's folder (Ctrl+O,
+   📂), else `last_dir` from `settings.json`. Remembered across two restarts
+   (checked in the dialog's own address bar, not just the argument).
+2. Done — menu sits exactly above ⋯, right edges aligned (measured 0–1 px).
+   Space, ←, →, Shift+→, ↑, ↓ in the open menu don't touch pause, position or
+   volume (the menu takes them; ↑/↓ move its highlight). Esc closes it, bar
+   stays; Space works again afterwards. "Remove…" shows only while registered.
+3. Fixed — registration writes everything listed (all 14 extensions), shell
+   reports the friendly name "Quiet Player" (`AssocQueryString`), Default
+   apps lists Quiet Player, launch is `pythonw.exe` with no console.
+   **Settings ignores `registeredAppUser`** on Windows 11 25H2 (build 26200),
+   with `%20`, a raw space, or a no-space name: it opens the Default apps
+   list. Fix: the message now says to search "Quiet Player" under "Set
+   defaults for applications". Also fixed: `is_registered()` compared the
+   command with the current Python path, so "Remove" would vanish (leaving a
+   stale registration) if Python moved; it now checks the keys exist.
+   Remove → keys gone, Quiet Player gone from Default apps, and a full
+   before/after diff of HKCU for all 14 extensions (Classes, FileExts incl.
+   UserChoice, RegisteredApplications) is empty, so VLC / Media Player are
+   unchanged.
+   **Not done (deliberately):** clicking "Set default" in Settings and then a
+   real Explorer double-click on .mp4/.mkv. That would replace the owner's
+   real defaults (currently the Media Player app), which "Remove" cannot
+   restore. Instead a throwaway `.qptest` type was pointed at
+   `QuietPlayer.Video` and opened with the shell's default verb (what a
+   double-click does), and real .mp4/.mkv were opened through the
+   `QuietPlayer.Video` verb; both ran the registered command correctly. The
+   "Open with" dialog itself was not screenshotted.
+4. Fixed — file handoff worked, but the running window did **not** come to
+   the front (Windows foreground lock; only the taskbar button would flash).
+   Fix: the second launch calls `AllowSetForegroundWindow(ASFW_ANY)` before
+   handing over. Verified from a foreground stand-in for Explorer: same
+   window, new file, one window, player in front, bar state unchanged with
+   the bar both hidden and shown. No-file launch focuses the existing window.
+5. Done — this report. The bar never appeared from any Round 3 action (polled
+   every 20 ms through Ctrl+O, the dialog, file loads and handoffs).
+
+Testing notes from Round 3: test input is now guarded — before every click
+or key the harness checks that the window under the cursor / in focus
+belongs to the test, and aborts otherwise (one early run clicked into the
+owner's browser before this guard existed). A background process cannot
+raise another app's window, so Explorer was not driven directly. Test
+harnesses that run without Qt must call `SetProcessDpiAwarenessContext(-4)`
+or their coordinates won't match UI Automation at 150%+ scaling.
+
 ## Current Objective (Focus Area)
 
-**Round 3 — open files from the app, and "make Quiet Player my default".**
-The code for items 1–4 was written overnight by the planning session (Claude
-in the owner's chat), NOT by the coding agent, and has **not been run on
-Windows**: the planning session had no PySide6/libmpv available. It passed a
-syntax check, a stand-in smoke test of the new code paths, and a registry
-test against a simulated `winreg`. The coding agent's job this round is item
-5: verify on the real PC, fix whatever is broken, and report per item.
-Rule from Round 1 still applies: nothing here may make the bar appear on its
-own.
-
-1. **Visible ways to open a file from inside the app.**
-   - 📂 button at the left of the control bar (= `Ctrl+O`).
-   - Before any file is open, the video area shows "Click here or press
-     Ctrl+O to open a video (or drag one onto this window)", and a left-click
-     there opens the file dialog (once a file is open, left-click goes back to
-     hiding the bar).
-   - The dialog starts in the current file's folder, or else the last folder
-     used (saved in `%APPDATA%\QuietPlayer\settings.json`).
-
-2. **⋯ menu at the right end of the bar:** "Open a video…",
-   "Make Quiet Player my default video player…", and (only once registered)
-   "Remove Quiet Player from Windows".
-
-3. **Default player registration** (`default_player.py`, per user, HKCU
-   only, no admin). Registers ProgID `QuietPlayer.Video`, Capabilities,
-   `RegisteredApplications` and `OpenWithProgids` for every extension in
-   `VIDEO_EXTS`. Launch command is `pythonw.exe "…\quiet_player.py" "%1"`
-   (or the .exe itself once packaged). Windows 10/11 don't let apps take the
-   default silently, so after registering, a message explains the last step
-   and Settings opens on `ms-settings:defaultapps?registeredAppUser=Quiet%20Player`
-   where the owner clicks "Set default". "Remove" deletes only what
-   `register()` added — other apps' entries are never touched.
-
-4. **One window only.** Opening a video while Quiet Player is already running
-   (e.g. double-clicking in Explorer once it's the default) hands the file to
-   the existing window via `QLocalServer`/`QLocalSocket` and brings it to the
-   front, instead of opening a second player. Launching with no file just
-   focuses the existing window.
-
-5. **Verification on the real PC (coding agent).** Report done / not done /
-   fixed for each:
-   - App starts; 📂 and ⋯ show on the bar; the empty-state text renders
-     before a file is open and disappears once mpv draws; click-to-open works.
-   - Dialog remembers the folder across restarts.
-   - ⋯ menu opens just above its button (it is positioned by hand —
-     `_menu_offset`) and Space/arrows don't trigger player shortcuts while it
-     is open.
-   - Make default → Settings opens on Quiet Player's page; after choosing it,
-     double-clicking an .mp4 and an .mkv in Explorer opens Quiet Player with
-     no console window, and "Open with" shows the name "Quiet Player" (not
-     "Python"). If Settings ignores `registeredAppUser`, say so.
-   - With the player open, double-click a second video: same window, new
-     file, no second window, bar state unchanged.
-   - Remove from Windows → Quiet Player disappears from Open with / Default
-     apps; VLC/Films & TV associations are unchanged.
-   - The bar never appears from any Round 3 action.
+None set. Round 3 is complete. Owner to-do: run "Make Quiet Player my default
+video player…", search "Quiet Player" in Settings, click "Set default", and
+try one real Explorer double-click on an .mp4 and .mkv.
 
 ## Next Steps (Do Not Start Yet)
 
