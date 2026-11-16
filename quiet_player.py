@@ -7,7 +7,9 @@ instantly, and only comes back on Tab or middle-click on the video.
 import json
 import os
 import re
+import subprocess
 import sys
+import threading
 import time
 
 # Settings -------------------------------------------------------------------
@@ -70,6 +72,14 @@ SHORTCUTS = (
     ("Ctrl+O", "Open a video"),
 )
 
+DEFAULT_APP_STEPS = (
+    "Windows doesn't let apps make themselves the default, so Settings "
+    "will open next on Default apps. Under \"Set defaults for applications\", "
+    "search for Quiet Player, open it and click \"Set default\" at the top "
+    "(or pick it for each file type you want).\n\n"
+    "Another way: right-click any video, Open with > Choose another app > "
+    "Quiet Player, and tick \"Always\".")
+
 EMPTY_HINT = "Click here or press Ctrl+O to open a video\n(or drag one onto this window)"
 
 # libmpv-2.dll and the icon sit next to this script, or next to QuietPlayer.exe
@@ -90,6 +100,7 @@ from PySide6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QFileDia
                                QPushButton, QSlider, QStyle, QVBoxLayout, QWidget)
 
 import default_player
+import updater
 
 def fmt_time(t):
     if t is None or t < 0:
@@ -198,6 +209,12 @@ class PositionStore:
             os.replace(tmp, self.path)
         except OSError:
             pass
+
+
+class UpdateEvents(QObject):
+    """Carries the update thread's results over to the Qt thread."""
+    found = Signal(str)                 # newer version, download starting
+    done = Signal(str, str, bool)       # kind ('ready', 'latest', 'manual', 'failed'), version, user
 
 
 class MpvEvents(QObject):
@@ -406,6 +423,21 @@ class PlayerWindow(QMainWindow):
         self.poll.timeout.connect(self.refresh)
         self.poll.start(250)
 
+        # Updates: silent unless asked for from the ⋯ menu (see updater.py).
+        self.update_busy = False       # a check / download is running
+        self.update_user = False       # ... and the user asked for it
+        self.update_found = None       # version being downloaded
+        self.update_events = UpdateEvents()
+        self.update_events.found.connect(self.on_update_found)
+        self.update_events.done.connect(self.on_update_done)
+        if updater.can_self_update():
+            threading.Thread(target=updater.cleanup_on_start, daemon=True).start()
+            self.update_timer = QTimer(self)
+            self.update_timer.timeout.connect(self.maybe_check_updates)
+            QTimer.singleShot(int(os.environ.get("QUIET_PLAYER_CHECK_DELAY_MS", 20_000)),
+                              self.maybe_check_updates)
+            self.update_timer.start(3600_000)
+
         QApplication.instance().installEventFilter(self)
 
     # --- bar visibility (only user actions call these) ----------------------
@@ -526,6 +558,15 @@ class PlayerWindow(QMainWindow):
         recent.addSeparator()
         recent.addAction("Clear list", self.clear_recent).setEnabled(bool(self._recent()))
         m.addAction("Keyboard shortcuts…", self.show_shortcuts)
+        staged = updater.staged_version() if updater.can_self_update() else None
+        if staged and updater.is_newer(staged):
+            m.addAction(f"Update {staged} installs when you close").setEnabled(False)
+        elif self.update_busy:
+            m.addAction(f"Downloading update {self.update_found}…" if self.update_found
+                        else "Checking for updates…").setEnabled(False)
+        else:
+            m.addAction(f"Check for updates (now {updater.APP_VERSION})",
+                        lambda: self.check_updates(user=True))
         m.addSeparator()
         if sys.platform == "win32":
             m.addAction("Make Quiet Player my default video player…", self.make_default)
@@ -539,7 +580,8 @@ class PlayerWindow(QMainWindow):
         d.setWindowTitle("Keyboard shortcuts")
         rows = "".join(f"<tr><td style='padding:2px 18px 2px 0'><b>{k}</b></td><td>{v}</td></tr>"
                        for k, v in SHORTCUTS)
-        text = QLabel(f"<table>{rows}</table>")
+        text = QLabel(f"<table>{rows}</table>"
+                      f"<p style='color:#888'>Quiet Player {updater.APP_VERSION}</p>")
         text.setTextFormat(Qt.RichText)
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(d.reject)
@@ -550,6 +592,48 @@ class PlayerWindow(QMainWindow):
         lay.addWidget(text)
         lay.addWidget(buttons)
         d.exec()
+
+    # --- updates (updater.py) -----------------------------------------------
+    def maybe_check_updates(self):
+        last = self.settings.get("update_checked")
+        if not isinstance(last, (int, float)) or time.time() - last >= updater.CHECK_EVERY_S:
+            self.check_updates(user=False)
+
+    def check_updates(self, user):
+        if self.update_busy:
+            return
+        self.update_busy, self.update_user, self.update_found = True, user, None
+        if user:
+            self.indicate("Checking for updates…", always=True, ms=FILE_INDICATOR_MS)
+        ev = self.update_events
+
+        def work():
+            try:
+                latest, staged = updater.check_and_stage(on_found=ev.found.emit)
+                kind = "ready" if staged else ("manual" if updater.is_newer(latest) else "latest")
+                ev.done.emit(kind, latest, user)
+            except Exception as e:      # network, signature, disk: try again later
+                updater.log(f"check failed: {e!r}")
+                ev.done.emit("failed", "", user)
+        threading.Thread(target=work, daemon=True).start()
+
+    def on_update_found(self, version):
+        self.update_found = version
+        if self.update_user:
+            self.indicate(f"Downloading update {version}…", always=True, ms=FILE_INDICATOR_MS)
+
+    def on_update_done(self, kind, version, user):
+        self.update_busy = False
+        if kind != "failed":
+            self.settings["update_checked"] = int(time.time())
+            save_settings(self.settings)
+        if not user:
+            return                      # automatic checks never show anything
+        text = {"ready": f"Update {version} installs when you close",
+                "latest": f"Up to date ({updater.APP_VERSION})",
+                "manual": f"Version {version} is out (this copy can't update itself)",
+                "failed": "Couldn't check for updates"}[kind]
+        self.indicate(text, always=True, ms=3000)
 
     # --- recent files -------------------------------------------------------
     def _recent(self):
@@ -585,12 +669,7 @@ class PlayerWindow(QMainWindow):
         QMessageBox.information(
             self, "Quiet Player",
             "Quiet Player is now registered with Windows as a video player.\n\n"
-            "Windows doesn't let apps make themselves the default, so Settings "
-            "will open next on Default apps. Under \"Set defaults for applications\", "
-            "search for Quiet Player, open it and click \"Set default\" at the top "
-            "(or pick it for each file type you want).\n\n"
-            "Another way: right-click any video, Open with > Choose another app > "
-            "Quiet Player, and tick \"Always\".")
+            + DEFAULT_APP_STEPS)
         default_player.open_default_apps_settings()
 
     def remove_from_windows(self):
@@ -783,6 +862,7 @@ class PlayerWindow(QMainWindow):
         self.volume_saver.stop()
         self.save_volume()
         self.mpv.terminate()
+        updater.apply_on_exit()        # a staged update replaces the app once we've exited
         super().closeEvent(e)
 
 
@@ -835,6 +915,36 @@ def listen_for_other_instances(window):
     return server
 
 
+def run_installer(args):
+    """'Install Quiet Player.bat' in the downloaded ZIP runs QuietPlayer.exe --install.
+    Test-only options: --install-to <dir>, --no-shortcut, --no-register, --quiet."""
+    dest = args[args.index("--install-to") + 1] if "--install-to" in args else None
+    quiet = "--quiet" in args
+    try:
+        exe = updater.install(dest_dir=dest, shortcut="--no-shortcut" not in args,
+                              register="--no-register" not in args)
+    except (updater.UpdateError, OSError) as err:
+        updater.log(f"install failed: {err}")
+        if not quiet:
+            QMessageBox.warning(None, "Quiet Player", f"Installing Quiet Player failed.\n\n{err}")
+        return 1
+    if quiet:
+        return 0
+    box = QMessageBox(QMessageBox.Information, "Quiet Player",
+                      f"Quiet Player {updater.APP_VERSION} is installed, with a shortcut in "
+                      "the Start menu. It keeps itself up to date: new versions download "
+                      "quietly and install when you close the player.\n\n"
+                      "Make it your default video player now?")
+    yes = box.addButton("Make it my default…", QMessageBox.AcceptRole)
+    box.addButton("Not now", QMessageBox.RejectRole)
+    box.exec()
+    if box.clickedButton() is yes:
+        QMessageBox.information(None, "Quiet Player", DEFAULT_APP_STEPS)
+        default_player.open_default_apps_settings()
+    subprocess.Popen([exe], close_fds=True)
+    return 0
+
+
 def main():
     if "--register" in sys.argv[1:]:
         # Used by install.bat: point the existing registration at this program,
@@ -847,6 +957,8 @@ def main():
     app = QApplication(sys.argv)
     if os.path.exists(ICON_FILE):
         app.setWindowIcon(QIcon(ICON_FILE))
+    if "--install" in sys.argv[1:]:
+        sys.exit(run_installer(sys.argv[1:]))
     path = sys.argv[1] if len(sys.argv) > 1 else None
     if hand_to_running_instance(path):
         return

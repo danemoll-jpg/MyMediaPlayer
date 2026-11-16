@@ -1,0 +1,34 @@
+Quiet Player — licences
+=======================
+
+Quiet Player's source code: https://github.com/danemoll-jpg/MyMediaPlayer
+
+This package bundles the components below. Because it includes libmpv built
+with GPL parts (and FFmpeg with GPL options), the package as a whole is
+distributed under the GNU General Public License version 3 (GPL-3.0.txt).
+The full source for each component is available from the links given.
+
+mpv / libmpv (libmpv-2.dll)
+  Licence: GPL-2.0-or-later (this build), see GPL-3.0.txt
+  Build: shinchiro/mpv-winbuild-cmake, mpv-dev-x86_64-20261021-git-e471496c56
+  Source: https://github.com/mpv-player/mpv
+          https://github.com/shinchiro/mpv-winbuild-cmake (build scripts and
+          the sources of FFmpeg and the other libraries built into it)
+
+Qt 6 and PySide6 / Shiboken6 6.12.0
+  Licence: LGPL-3.0, see LGPL-3.0.txt and GPL-3.0.txt
+  Source: https://download.qt.io/official_releases/QtForPython/
+          https://code.qt.io/cgit/pyside/pyside-setup.git/
+  The Qt and PySide6 libraries are separate files in this folder (PySide6\
+  and the Qt*.dll files) and can be replaced with your own builds.
+
+python-mpv 1.0.8
+  Licence: LGPL-2.1-or-later (dual licensed GPL-2.0-or-later), see LGPL-2.1.txt
+  Source: https://github.com/jaseg/python-mpv
+
+Python 3.14
+  Licence: PSF License, see Python-LICENSE.txt
+  Source: https://www.python.org/downloads/source/
+
+Packaged with PyInstaller (its bootloader carries a licence exception that
+allows distribution with any program): https://pyinstaller.org

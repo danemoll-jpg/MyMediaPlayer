@@ -305,10 +305,65 @@ the same out-of-process suite against source 32/32.
 2. Play something: try `]`, `Backspace`, `M`, ⋯ → Recent and ⋯ → Keyboard
    shortcuts. Then Round 5 is complete.
 
+**Round 6 — public download that keeps itself up to date (2026-11-16).
+Built, tested and published (1.0.0, then 1.0.1 = Latest).** Same release
+setup as Dan's games (Chastain Rush etc.): a public
+`danemoll-jpg/quiet-player-releases` repo, an RSA-signed
+`update-catalog.json` at `releases/latest/download/`, a ZIP per version,
+and a game-hub card. Decisions (owner, 2026-11-16): updates are silent and
+install on close (no launcher, nothing pops up); publish once tested.
+
+1. Done — `updater.py`: `APP_VERSION`, pinned public key (3072-bit RSA,
+   PKCS#1 v1.5 SHA-256, verified in pure Python), at most one automatic
+   check per 20 h (first one 20 s after start, then hourly re-test of
+   "due"), download checked against size and SHA-256 from the signed
+   catalog, unpacked to `<app>.update`. On close a hidden PowerShell step
+   waits for the exit and renames `<app>` → `<app>.previous`,
+   `<app>.update` → `<app>`; if the folder is in use nothing changes and
+   the next close retries. The new version deletes `.previous` on start.
+   Log: `%LOCALAPPDATA%\QuietPlayer\update.log`. Only the packaged exe
+   updates itself (not `python quiet_player.py`).
+2. Done — ⋯ menu: "Check for updates (now 1.0.1)", or "Downloading
+   update X…" / "Update X installs when you close" (disabled). Results of a
+   menu check go to the corner text; automatic checks show nothing. Version
+   also shown at the bottom of the Keyboard shortcuts dialog.
+3. Done — `QuietPlayer.exe --install` (run by `Install Quiet Player.bat` in
+   the ZIP): copies to `%LOCALAPPDATA%\Programs\QuietPlayer`, removes the
+   internet "Zone.Identifier" mark (otherwise Windows warns each time a
+   video opens), Start menu shortcut, `--register`, then offers the
+   make-default steps and starts the player.
+4. Done — `release.py build` / `publish`, `licenses/` (GPL-3.0, LGPL-3.0,
+   LGPL-2.1, Python, THIRD-PARTY-NOTICES) shipped in `QuietPlayer\LICENSES`.
+   Private key `PublisherPrivate\quiet-player-signing.pem` (git-ignored).
+5. Done — tests (scratch `APPDATA`/`LOCALAPPDATA`, `--no-register`, windows
+   closed only with WM_CLOSE to the test's own processes): local server
+   26/26 (tampered payload / key id / signature rejected, bad checksum
+   never staged, install from ZIP incl. Zone.Identifier removal and
+   shortcut, 1.0.0 stages 1.0.1 by itself, swap refused while a file in the
+   folder is open then done on the next close, 1.0.1 cleans up and reports
+   up to date); menu check text in-process ("Up to date (1.0.1)",
+   "Couldn't check for updates", bar stays hidden). Real GitHub: published
+   1.0.0 ZIP downloaded (hash matches), installed, saw itself latest; with
+   1.0.1 published it updated via that release's catalog, and a fresh
+   1.0.0 install updated via the real Latest URL with no override, then
+   1.0.1 started, removed `.previous` and saw itself latest. Not tested:
+   the real Explorer double-click on the .bat with SmartScreen, and
+   clicking the ⋯ item with the mouse.
+6. Done — game-hub card (`game-hub` commit "Add Quiet Player download card
+   to the game library", links to `releases/latest`). Not pushed. The
+   ShiftStorm card already sitting uncommitted there was left as is.
+
+#### To finish Round 6 (owner)
+
+1. Double-click `install.bat` in Explorer (this also finishes Round 5).
+   Your installed copy becomes 1.0.1 with the updater; from then on it
+   updates itself from GitHub like everyone else's.
+2. Push game-hub when you're happy with the card.
+
 ## Current Objective (Focus Area)
 
-None yet: waiting for the owner's `install.bat` run for Round 5 and the
-next round's plan.
+None yet: waiting for the owner's `install.bat` run (Rounds 5 and 6) and
+the next round's plan.
 
 ## Next Steps (Do Not Start Yet)
 

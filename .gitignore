@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 build/
 dist/
+PublisherPrivate/
+release/
+build_pub.txt

@@ -28,7 +28,13 @@
 - Keep it small: `quiet_player.py` is the app; `default_player.py` holds the
   Windows registry code for "make default" (HKCU only, never touch other
   apps' associations). `make_icon.py` draws `quiet_player.ico`;
-  `install.bat` builds the .exe and installs it.
+  `install.bat` builds the .exe and installs it. `updater.py` holds
+  `APP_VERSION`, the signed-catalog check, download, swap-on-close and
+  `--install` (no Qt in it); `release.py` builds, signs and publishes.
+- Updates are silent: automatic checks never show anything (no dialog, no
+  corner text, never the bar). Only the ⋯ menu's "Check for updates"
+  reports, via the corner text. A staged update installs after the player
+  closes, never while it runs.
 
 ## Commands
 ```
@@ -36,7 +42,24 @@ pip install PySide6 python-mpv pyinstaller pillow
 python quiet_player.py [optional path to video]   # run from source (dev)
 install.bat                    # build + install to %LOCALAPPDATA%\Programs\QuietPlayer
 QuietPlayer.exe --register     # point QuietPlayer.Video at this exe, no window
+QuietPlayer.exe --install      # what the ZIP's "Install Quiet Player.bat" runs
 ```
+
+Publishing a new version (public, so only when the owner asks):
+```
+# bump APP_VERSION in updater.py and commit, then:
+python release.py build --notes "What changed."      # -> release\<version>\
+python release.py publish --confirm-repository danemoll-jpg/quiet-player-releases
+```
+Every installed copy (the owner's included) picks it up within a day and
+installs it on close. Releases live in `danemoll-jpg/quiet-player-releases`
+(gh: `C:\Users\danmo\Racer\Builds\PublisherTools\gh-2.101.0\bin\gh.exe`).
+The signing key `PublisherPrivate\quiet-player-signing.pem` is git-ignored:
+never delete, print or replace it (installed copies only trust that key).
+Test an update with `QUIET_PLAYER_CATALOG=<a release's update-catalog.json
+URL>` (plus `QUIET_PLAYER_CHECK_DELAY_MS`), scratch `APPDATA`/`LOCALAPPDATA`,
+and `--install --install-to <dir> --no-register --no-shortcut --quiet`.
+Download card: `C:\Users\danmo\game-hub\games.js` (`quiet-player`).
 
 ## Where things stand
 **Before starting any work, commit any uncommitted changes** (planning
@@ -47,8 +70,10 @@ rule when rewriting this file.
 Rounds 1–4 are complete and the installed .exe is the owner's default
 video player (ProgID `QuietPlayer.Video`; keep it, never unregister).
 Round 5 (speed, frame step, mute, remembered volume, recent files,
-shortcuts dialog) is built and tested; it is finished once the owner runs
-`install.bat` from Explorer (see `TODO.md`). No next round is planned yet. Updates reach the owner's PC by him
+shortcuts dialog) and Round 6 (public download that keeps itself up to
+date; 1.0.1 published) are built and tested; they are finished once the
+owner runs `install.bat` from Explorer (see `TODO.md`). No next round is
+planned yet. Updates reach the owner's PC by him
 double-clicking `install.bat` in Explorer: registry writes from a Claude Code
 session are virtualized and never reach Explorer. For each round, report a
 status for every numbered item individually, and batch the round into one
